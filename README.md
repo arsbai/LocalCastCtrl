@@ -6,7 +6,8 @@
 
 [下载本衍生版 APK](https://github.com/arsbai/LocalCastCtrl/releases/tag/v1.1.1-dev) · [查看原作者发布的版本](https://github.com/cwe88108/LocalCastPro/releases)
 
-> 原作者的 V1.0.10 安装包不包含本文新增的扫码与远程控制功能。
+> 原作者不包含本文新增的扫码与远程控制功能。
+> 原作者不包含本文新增的扫码与远程控制功能（也就是说我主要增加了这两个功能，并且修复了原作者显示ip的bug）
 
 ## 快速使用
 
