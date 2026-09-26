@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.TextView;
@@ -17,9 +18,11 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import com.google.android.material.button.MaterialButton;
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.localcast.pro.LocalCastApplication;
 import com.localcast.pro.R;
 import com.localcast.pro.core.CastManager;
+import com.localcast.pro.service.RemoteControlService;
 import com.localcast.pro.utils.Logger;
 import com.localcast.pro.utils.FrameRateUtils;
 
@@ -33,7 +36,7 @@ public class SenderActivity extends AppCompatActivity {
     private static final int REQUEST_AUDIO_PERMISSION = 1001;
 
     private TextView tvReceiverName, tvLatency, tvBitrate, tvFps;
-    private MaterialButton btnPause, btnStop, btnSwitch, btnFullscreen;
+    private MaterialButton btnPause, btnStop, btnSwitch, btnFullscreen, btnAllowControl;
     private View layoutStats;
 
     private CastManager castManager;
@@ -62,6 +65,7 @@ public class SenderActivity extends AppCompatActivity {
         btnStop = findViewById(R.id.btn_stop);
         btnSwitch = findViewById(R.id.btn_switch);
         btnFullscreen = findViewById(R.id.btn_fullscreen);
+        btnAllowControl = findViewById(R.id.btn_allow_control);
         layoutStats = findViewById(R.id.layout_stats);
 
         castManager = ((LocalCastApplication) getApplication()).getCastManager();
@@ -103,6 +107,7 @@ public class SenderActivity extends AppCompatActivity {
 
         // 全屏：发送端切横屏捕获 + 接收端 COVER 铺满电视
         btnFullscreen.setOnClickListener(v -> toggleFullscreen());
+        btnAllowControl.setOnClickListener(v -> toggleRemoteControl());
 
         // 悬浮统计拖拽
         layoutStats.setOnTouchListener(new View.OnTouchListener() {
@@ -134,6 +139,7 @@ public class SenderActivity extends AppCompatActivity {
             public void onConnected(com.localcast.pro.core.DeviceInfo d) {
                 runOnUiThread(() -> {
                     tvReceiverName.setText("投屏至 " + d.getDeviceName());
+                    refreshControlButton();
                     Toast.makeText(SenderActivity.this,
                             "投屏已连接", Toast.LENGTH_SHORT).show();
                 });
@@ -194,6 +200,46 @@ public class SenderActivity extends AppCompatActivity {
                 && connectedDevice != null) {
             tvReceiverName.setText("投屏至 " + connectedDevice.getDeviceName());
         }
+        refreshControlButton();
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        if (castManager != null) refreshControlButton();
+    }
+
+    private void refreshControlButton() {
+        btnAllowControl.setText(castManager.isRemoteControlAllowed()
+                ? "停止远程控制" : "允许本次远程控制");
+    }
+
+    private void toggleRemoteControl() {
+        if (castManager.isRemoteControlAllowed()) {
+            castManager.setRemoteControlAllowed(false);
+            refreshControlButton();
+            return;
+        }
+        if (!castManager.getConnectionManager().isControlPaired()) {
+            Toast.makeText(this, "请先扫描接收手机的二维码配对", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (!RemoteControlService.isAvailable()) {
+            new MaterialAlertDialogBuilder(this)
+                    .setTitle("开启本机远程控制服务")
+                    .setMessage("请在系统无障碍设置中手动启用“投屏神器远程控制”，返回后再次点击允许。本服务只在您批准的当前投屏会话中执行操作。")
+                    .setPositiveButton("打开系统设置", (d, w) ->
+                            startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)))
+                    .setNegativeButton("取消", null).show();
+            return;
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("允许另一台手机操作本机？")
+                .setMessage("对方可点击、滑动、返回和进入主页。本次授权在停止投屏或断线后失效。请只与可信手机连接。")
+                .setPositiveButton("允许本次控制", (d, w) -> {
+                    castManager.setRemoteControlAllowed(true);
+                    refreshControlButton();
+                })
+                .setNegativeButton("取消", null).show();
     }
 
     @Override

@@ -16,8 +16,8 @@ android {
         applicationId "com.localcast.pro"
         minSdk 24
         targetSdk 34
-        versionCode 11
-        versionName "1.0.10"
+        versionCode 12
+        versionName "1.1.0-dev"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
@@ -47,6 +47,7 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
         debug {
+            applicationIdSuffix '.dev'
             minifyEnabled false
         }
     }
@@ -74,6 +75,7 @@ dependencies {
     implementation 'androidx.preference:preference:1.2.1'
     implementation 'androidx.lifecycle:lifecycle-runtime:2.8.6'
     implementation 'androidx.lifecycle:lifecycle-service:2.8.6'
+    implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
 
     testImplementation 'junit:junit:4.13.2'
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'

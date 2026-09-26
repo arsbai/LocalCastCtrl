@@ -8,9 +8,12 @@ import android.view.Surface;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.localcast.pro.service.CastService;
+import com.localcast.pro.service.RemoteControlService;
 import com.localcast.pro.utils.DisplayUtils;
 import com.localcast.pro.utils.Logger;
 import com.localcast.pro.utils.NetworkUtils;
+import org.json.JSONObject;
+import java.nio.charset.StandardCharsets;
 
 /**
  * 投屏管理器 - 统一管理投屏全生命周期
@@ -41,6 +44,7 @@ public class CastManager {
     private final AtomicBoolean reconnecting = new AtomicBoolean(false);
     private static final int MAX_RECONNECT_ATTEMPTS = 5;
     private int reconnectAttempts;
+    private volatile boolean remoteControlAllowed;
 
     private OnCastStateListener castStateListener;
 
@@ -63,7 +67,7 @@ public class CastManager {
 
         localDevice = new DeviceInfo();
         localDevice.initDeviceId(context);
-        localDevice.setIpAddress(NetworkUtils.getLocalIpAddress());
+        localDevice.setIpAddress(NetworkUtils.getLocalIpAddress(context));
         localDevice.setDeviceType(DeviceInfo.isTvDevice(context)
                 ? DeviceInfo.TYPE_TV : DeviceInfo.TYPE_PHONE);
         // This value is informational for discovery only. Session negotiation
@@ -82,7 +86,7 @@ public class CastManager {
         localDevice.setUdpPort(ConnectionManager.TCP_PORT);
 
         connectionManager = new ConnectionManager();
-        connectionManager.init(localDevice);
+        connectionManager.init(localDevice, context);
 
         Logger.i(TAG, "CastManager initialized: " + localDevice.getDeviceName() +
                 " @ " + localDevice.getIpAddress());
@@ -91,6 +95,10 @@ public class CastManager {
     // ==================== 发送端 ====================
 
     public void startAsSender(String targetIp, MediaProjection projection) {
+        startAsSender(targetIp, projection, null);
+    }
+
+    public void startAsSender(String targetIp, MediaProjection projection, String pairingToken) {
         if (currentMode != CastMode.IDLE) {
             Logger.w(TAG, "Already in mode: " + currentMode);
             return;
@@ -101,6 +109,7 @@ public class CastManager {
         senderHasConnected = false;
         reconnectAttempts = 0;
         reconnecting.set(false);
+        remoteControlAllowed = false;
 
         String fpsPreference = androidx.preference.PreferenceManager
                 .getDefaultSharedPreferences(context).getString("frame_rate", "30");
@@ -153,8 +162,14 @@ public class CastManager {
                     // A sender must read the receiver's heartbeats as well; the
                     // former implementation only wrote video and could not detect
                     // a half-open receiver connection.
-                    transport.setOnFrameReceivedListener((type, timestamp, flags, data, length) ->
-                            connectionManager.updateHeartbeat());
+                    transport.setOnFrameReceivedListener((type, timestamp, flags, data, length) -> {
+                        connectionManager.updateHeartbeat();
+                        if (type == StreamTransport.TYPE_REMOTE_INPUT && remoteControlAllowed
+                                && connectionManager.isControlPaired() && data != null
+                                && length > 0 && length <= 256) {
+                            RemoteControlService.dispatch(data, length);
+                        }
+                    });
                     transport.setOnErrorListener(connectionManager::onTransportFailure);
                     transport.startReading();
                 }
@@ -186,6 +201,7 @@ public class CastManager {
 
             @Override
             public void onDeviceDisconnected(String reason) {
+                remoteControlAllowed = false;
                 Logger.w(TAG, "Disconnected: " + reason);
                 if (scheduleSenderReconnect(reason)) {
                     if (castStateListener != null) {
@@ -219,7 +235,7 @@ public class CastManager {
         });
 
         // 发起TCP连接
-        connectionManager.connectTo(targetIp);
+        connectionManager.connectTo(targetIp, pairingToken);
 
         if (castStateListener != null) castStateListener.onModeChanged(CastMode.SENDING);
     }
@@ -412,6 +428,7 @@ public class CastManager {
         sessionProjection = null;
         senderTargetIp = null;
         senderHasConnected = false;
+        remoteControlAllowed = false;
         reconnecting.set(false);
         if (stopService && modeBeforeStop == CastMode.SENDING) {
             stopCastService();
@@ -458,6 +475,25 @@ public class CastManager {
 
     public int getReceiverVideoHeight() {
         return receiverManager != null ? receiverManager.getVideoHeight() : 0;
+    }
+
+    public void setRemoteControlAllowed(boolean allowed) {
+        remoteControlAllowed = allowed && currentMode == CastMode.SENDING
+                && connectionManager.isControlPaired() && RemoteControlService.isAvailable();
+    }
+
+    public boolean isRemoteControlAllowed() {
+        return remoteControlAllowed && RemoteControlService.isAvailable();
+    }
+
+    /** Receiver input travels backwards on the paired media socket. */
+    public boolean sendRemoteInput(JSONObject command) {
+        if (currentMode != CastMode.RECEIVING || !connectionManager.isControlPaired()) return false;
+        StreamTransport transport = connectionManager.getStreamTransport();
+        if (transport == null || !transport.isRunning()) return false;
+        byte[] payload = command.toString().getBytes(StandardCharsets.UTF_8);
+        return payload.length <= 256 && transport.sendFrame(StreamTransport.TYPE_REMOTE_INPUT,
+                System.nanoTime(), StreamTransport.FLAG_NONE, payload, payload.length);
     }
 
     // ==================== Getters ====================

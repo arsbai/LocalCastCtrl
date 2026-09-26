@@ -1,5 +1,10 @@
 package com.localcast.pro.core;
 
+import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+
 import com.localcast.pro.utils.Logger;
 
 import org.json.JSONObject;
@@ -12,6 +17,7 @@ import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -40,6 +46,7 @@ public class ConnectionManager {
 
     private volatile ConnectionState state = ConnectionState.DISCONNECTED;
     private DeviceInfo localDevice;
+    private Context context;
     private DeviceInfo remoteDevice;
 
     private ServerSocket serverSocket;
@@ -59,6 +66,9 @@ public class ConnectionManager {
     private int negotiatedBitrate = 4_000_000;
     private int negotiatedFps = 60;
     private int requestedFps = 30;
+    private volatile String pairingToken;
+    private volatile String clientPairingToken;
+    private volatile boolean controlPaired;
 
     private final AtomicBoolean disconnecting = new AtomicBoolean(false);
     /** 客户端已连接或正在连接 */
@@ -145,12 +155,14 @@ public class ConnectionManager {
 
             DeviceInfo senderInfo = DeviceInfo.fromJson(request.getJSONObject("deviceInfo"));
             this.remoteDevice = senderInfo;
+            controlPaired = pairingToken != null && pairingToken.equals(request.optString("pairingToken"));
 
             negotiateCodecParams(request);
 
             JSONObject response = new JSONObject();
             response.put("command", "CONNECT_RESPONSE");
             response.put("status", "OK");
+            response.put("controlPaired", controlPaired);
             response.put("deviceInfo", localDevice.toJson());
             response.put("codec", negotiatedCodec);
             response.put("width", negotiatedWidth);
@@ -234,8 +246,36 @@ public class ConnectionManager {
         connectThread.start();
     }
 
+    public void init(DeviceInfo localDevice, Context context) {
+        init(localDevice);
+        this.context = context.getApplicationContext();
+    }
+
+    public void connectTo(String host, String token) {
+        clientPairingToken = token;
+        connectTo(host);
+    }
+
+    /** A fresh code is required each time the receiver screen is opened. */
+    public String rotatePairingToken() {
+        byte[] secret = new byte[16];
+        new SecureRandom().nextBytes(secret);
+        StringBuilder hex = new StringBuilder(32);
+        for (byte b : secret) hex.append(String.format(java.util.Locale.US, "%02x", b & 0xff));
+        pairingToken = hex.toString();
+        controlPaired = false;
+        return pairingToken;
+    }
+
+    public void clearPairingToken() {
+        pairingToken = null;
+        controlPaired = false;
+    }
+
+    public boolean isControlPaired() { return controlPaired; }
+
     private boolean connectOnce(String host) throws Exception {
-        Socket socket = new Socket();
+        Socket socket = newWifiSocket();
         socket.connect(new InetSocketAddress(host, TCP_PORT), 5000);
         socket.setTcpNoDelay(true);
         socket.setSoTimeout(10000);
@@ -251,6 +291,7 @@ public class ConnectionManager {
         request.put("screenWidth", localDevice.getScreenWidth());
         request.put("screenHeight", localDevice.getScreenHeight());
         request.put("requestedFps", requestedFps);
+        if (clientPairingToken != null) request.put("pairingToken", clientPairingToken);
         writer.println(request.toString());
 
         String responseJson = readLimitedLine(reader);
@@ -260,6 +301,7 @@ public class ConnectionManager {
         if (!"OK".equals(response.optString("status", ""))) {
             throw new IOException("Rejected: " + response.optString("status"));
         }
+        controlPaired = clientPairingToken != null && response.optBoolean("controlPaired", false);
 
         this.remoteDevice = DeviceInfo.fromJson(response.getJSONObject("deviceInfo"));
         this.negotiatedCodec = response.optString("codec", "avc");
@@ -281,6 +323,22 @@ public class ConnectionManager {
         setState(ConnectionState.CONNECTED);
         notifyDeviceConnected();
         return true;
+    }
+
+    private Socket newWifiSocket() throws IOException {
+        if (context != null) {
+            ConnectivityManager cm = (ConnectivityManager)
+                    context.getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm != null) {
+                for (Network network : cm.getAllNetworks()) {
+                    NetworkCapabilities caps = cm.getNetworkCapabilities(network);
+                    if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
+                        return network.getSocketFactory().createSocket();
+                    }
+                }
+            }
+        }
+        return new Socket();
     }
 
     /** Reject oversized or unterminated peer handshakes before parsing JSON. */
@@ -319,6 +377,7 @@ public class ConnectionManager {
             dataSocket = null;
         }
         remoteDevice = null;
+        controlPaired = false;
         pendingConnectedNotification = false;
         if (clearClientActive) {
             clientActive.set(false);
@@ -421,6 +480,8 @@ public class ConnectionManager {
         // A full stop ends the sender session. Leaving clientActive set here
         // causes every later manual connection to be silently rejected.
         clearSession(true);
+        clientPairingToken = null;
+        clearPairingToken();
         serverRunning.set(false);
         running.set(false);
         pendingConnectedNotification = false;

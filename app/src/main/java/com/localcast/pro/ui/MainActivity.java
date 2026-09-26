@@ -29,6 +29,8 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.progressindicator.CircularProgressIndicator;
 import com.google.android.material.progressindicator.LinearProgressIndicator;
 import com.google.android.material.textfield.TextInputEditText;
+import com.journeyapps.barcodescanner.ScanContract;
+import com.journeyapps.barcodescanner.ScanOptions;
 import com.localcast.pro.LocalCastApplication;
 import com.localcast.pro.R;
 import com.localcast.pro.core.CastManager;
@@ -36,6 +38,7 @@ import com.localcast.pro.service.CastService;
 import com.localcast.pro.core.ConnectionManager;
 import com.localcast.pro.core.DeviceInfo;
 import com.localcast.pro.core.DeviceManager;
+import com.localcast.pro.core.PairingCode;
 import com.localcast.pro.utils.NetworkUtils;
 import com.localcast.pro.utils.FrameRateUtils;
 
@@ -64,7 +67,9 @@ public class MainActivity extends AppCompatActivity {
 
     // AndroidX 现代权限请求 API
     private ActivityResultLauncher<Intent> screenCaptureLauncher;
+    private ActivityResultLauncher<ScanOptions> qrScanner;
     private String pendingTargetIp;
+    private String pendingPairingToken;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -82,6 +87,19 @@ public class MainActivity extends AppCompatActivity {
                         toast("需要屏幕录制权限才能投屏");
                     }
                 });
+        qrScanner = registerForActivityResult(new ScanContract(), result -> {
+            if (result.getContents() == null) return;
+            PairingCode code = PairingCode.parse(result.getContents());
+            if (code == null) { toast("二维码不是本应用的配对码"); return; }
+            if (!NetworkUtils.isOnSameWifi(this, code.ip)) {
+                toast("两台手机需连接同一 Wi-Fi 局域网");
+                return;
+            }
+            DeviceInfo target = new DeviceInfo();
+            target.setIpAddress(code.ip);
+            target.setDeviceName("扫码设备 " + code.ip);
+            connectToDevice(target, code.token);
+        });
 
         initViews();
         initCastManager();
@@ -109,19 +127,16 @@ public class MainActivity extends AppCompatActivity {
         adapter = new DeviceAdapter();
         rvDevices.setAdapter(adapter);
 
-        cardSender.setOnClickListener(v -> {
-            if (devices.isEmpty()) {
-                toast("未发现设备\n请先在另一台设备上打开App并点击【接收投屏】");
-            } else {
-                toast("请在下方的设备列表中点击【连接】");
-            }
-        });
+        cardSender.setOnClickListener(v -> scanPairingCode());
 
         cardReceiver.setOnClickListener(v ->
                 startActivity(new Intent(this, ReceiverActivity.class)));
 
         btnStopCasting.setOnClickListener(v -> castManager.stopCurrentMode());
         btnManualConnect.setOnClickListener(v -> showManualConnectDialog());
+        findViewById(R.id.btn_scan_pair).setOnClickListener(v -> scanPairingCode());
+        findViewById(R.id.btn_show_pair_code).setOnClickListener(v ->
+                startActivity(new Intent(this, ReceiverActivity.class)));
         findViewById(R.id.fab_settings).setOnClickListener(v ->
                 startActivity(new Intent(this, SettingsActivity.class)));
     }
@@ -173,9 +188,16 @@ public class MainActivity extends AppCompatActivity {
         // listener is actually active. ReceiverActivity owns that advertisement.
         deviceManager.startDiscovery();
 
-        tvLocalIp.setText(NetworkUtils.getLocalIpAddress());
+        refreshNetworkHeader();
+    }
+
+    private void refreshNetworkHeader() {
+        String ip = NetworkUtils.getLocalIpAddress(this);
+        tvLocalIp.setText("0.0.0.0".equals(ip) ? "无局域网地址" : ip);
+        if (castManager != null) castManager.getLocalDevice().setIpAddress(ip);
         String ssid = NetworkUtils.getWifiSSID(this);
-        tvWifiInfo.setText(ssid != null ? ssid : "未连接WiFi");
+        tvWifiInfo.setText(ssid != null ? ssid :
+                (NetworkUtils.isWifiConnected(this) ? "已连接 Wi-Fi（SSID 受系统限制）" : "未连接 Wi-Fi"));
     }
 
     private void requestNeededPermissions() {
@@ -225,6 +247,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (tvLocalIp != null) refreshNetworkHeader();
         if (castManager != null) refreshStatusBar();
     }
 
@@ -243,7 +266,16 @@ public class MainActivity extends AppCompatActivity {
     // ==================== 连接 ====================
 
     private void connectToDevice(DeviceInfo device) {
+        connectToDevice(device, null);
+    }
+
+    private void connectToDevice(DeviceInfo device, String token) {
+        if ("0.0.0.0".equals(NetworkUtils.getLocalIpAddress(this))) {
+            toast("未获得 Wi-Fi 地址，请检查网络连接");
+            return;
+        }
         pendingTargetIp = device.getIpAddress();
+        pendingPairingToken = token;
         // Request the display mode before projection consent so MediaProjection
         // captures a high-refresh source when the device permits it.
         FrameRateUtils.applyCastingRefreshRate(this);
@@ -266,7 +298,7 @@ public class MainActivity extends AppCompatActivity {
                         stopCastService();
                         return;
                     }
-                    castManager.startAsSender(pendingTargetIp, projection);
+                    castManager.startAsSender(pendingTargetIp, projection, pendingPairingToken);
                     startActivity(new Intent(MainActivity.this, SenderActivity.class));
                 });
             }
@@ -297,6 +329,12 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private void scanPairingCode() {
+        qrScanner.launch(new ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                .setPrompt("扫描接收手机显示的二维码")
+                .setBeepEnabled(false));
+    }
+
     private void launchScreenCaptureIntent() {
         if (isFinishing() || isDestroyed()) {
             return;
@@ -322,7 +360,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void showManualConnectDialog() {
         TextInputEditText et = new TextInputEditText(this);
-        et.setHint("输入电视/盒子的IP地址");
+        et.setHint("输入接收手机/电视的 IP 地址");
         et.setSingleLine();
         et.setPadding(48, 32, 48, 32);
         new MaterialAlertDialogBuilder(this)

@@ -12,6 +12,42 @@
         android:layout_height="match_parent"
         android:layout_gravity="center" />
 
+    <com.google.android.material.card.MaterialCardView
+        android:id="@+id/layout_pairing_qr"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:visibility="gone"
+        app:cardCornerRadius="16dp"
+        app:cardBackgroundColor="@android:color/white">
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="16dp">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="用另一台手机扫码连接"
+                android:textColor="@android:color/black"
+                android:textSize="16sp" />
+            <ImageView
+                android:id="@+id/iv_pair_qr"
+                android:layout_width="224dp"
+                android:layout_height="224dp"
+                android:layout_marginTop="10dp"
+                android:contentDescription="本机配对二维码" />
+            <TextView
+                android:id="@+id/tv_pair_address"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:textColor="@android:color/black"
+                android:textSize="12sp" />
+        </LinearLayout>
+    </com.google.android.material.card.MaterialCardView>
+
     <!-- 顶部信息条 -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/layout_info_bar"
@@ -108,6 +144,36 @@
                 android:text="结束"
                 android:textColor="@color/md_error_container"
                 android:textSize="13sp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_remote_control"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:text="控制"
+                android:textColor="@color/white"
+                android:visibility="gone" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_remote_back"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:text="返回"
+                android:textColor="@color/white"
+                android:visibility="gone" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_remote_home"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:text="主页"
+                android:textColor="@color/white"
+                android:visibility="gone" />
 
         </LinearLayout>
 

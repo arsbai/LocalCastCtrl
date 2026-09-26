@@ -170,7 +170,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="4dp"
-                            android:text="手机投到电视"
+                            android:text="分享本机屏幕"
                             android:textColor="@color/md_on_surface_variant"
                             android:textSize="12sp" />
 
@@ -221,7 +221,7 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="4dp"
-                            android:text="电视接收画面"
+                            android:text="在本机查看并控制"
                             android:textColor="@color/md_on_surface_variant"
                             android:textSize="12sp" />
 
@@ -229,6 +229,27 @@
 
                 </com.google.android.material.card.MaterialCardView>
 
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="20dp">
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_scan_pair"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginEnd="8dp"
+                    android:text="扫码连接" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_show_pair_code"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="显示我的二维码" />
             </LinearLayout>
 
             <!-- ========== 设备列表标题 ========== -->

@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="remote_control_service_label">投屏神器远程控制</string>
+    <string name="remote_control_service_description">仅在本机主动允许的扫码投屏会话中，执行另一台手机发来的点击、滑动、返回和主页操作。</string>
     <string name="app_name">投屏神器</string>
     <string name="app_name_en">LocalCast Pro</string>
     <string name="device_discovery">设备发现</string>

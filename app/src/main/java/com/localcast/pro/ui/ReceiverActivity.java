@@ -3,6 +3,8 @@ package com.localcast.pro.ui;
 
 
 import android.graphics.Matrix;
+import android.graphics.Bitmap;
+import android.graphics.Color;
 
 import android.graphics.Point;
 
@@ -29,6 +31,7 @@ import android.view.ViewTreeObserver;
 import android.view.WindowInsetsController;
 
 import android.widget.FrameLayout;
+import android.widget.ImageView;
 
 import android.widget.TextView;
 
@@ -51,6 +54,13 @@ import com.localcast.pro.core.CastManager;
 import com.localcast.pro.core.DeviceManager;
 
 import com.localcast.pro.core.ReceiverManager;
+import com.localcast.pro.core.PairingCode;
+import com.google.zxing.BarcodeFormat;
+import com.google.zxing.MultiFormatWriter;
+import com.google.zxing.common.BitMatrix;
+import org.json.JSONObject;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import com.localcast.pro.utils.DisplayUtils;
 
@@ -73,6 +83,12 @@ public class ReceiverActivity extends AppCompatActivity
     private View layoutInfoBar, layoutControlBar;
 
     private MaterialButton btnDisplayMode, btnStopRecv;
+    private MaterialButton btnRemoteControl, btnRemoteBack, btnRemoteHome;
+    private View pairingQr;
+    private boolean remoteControlMode;
+    private float[] controlStart;
+    private long controlDownTime;
+    private final ExecutorService inputExecutor = Executors.newSingleThreadExecutor();
 
 
 
@@ -110,7 +126,7 @@ public class ReceiverActivity extends AppCompatActivity
 
     private final Runnable hideBars = () -> {
 
-        if (isFullscreenDisplayMode()) return;
+        if (isFullscreenDisplayMode() || remoteControlMode) return;
 
         layoutInfoBar.animate().alpha(0f).setDuration(500).start();
 
@@ -161,6 +177,10 @@ public class ReceiverActivity extends AppCompatActivity
         btnDisplayMode = findViewById(R.id.btn_display_mode);
 
         btnStopRecv = findViewById(R.id.btn_stop_recv);
+        btnRemoteControl = findViewById(R.id.btn_remote_control);
+        btnRemoteBack = findViewById(R.id.btn_remote_back);
+        btnRemoteHome = findViewById(R.id.btn_remote_home);
+        pairingQr = findViewById(R.id.layout_pairing_qr);
 
 
 
@@ -181,14 +201,14 @@ public class ReceiverActivity extends AppCompatActivity
         setupGestures();
 
         setupControls();
+        showPairingQr();
 
 
 
-        String localIp = NetworkUtils.getLocalIpAddress();
-
-        tvSenderName.setText("等待投屏… IP: " + localIp);
-
-        Toast.makeText(this, "等待投屏连接…\n本机IP: " + localIp, Toast.LENGTH_LONG).show();
+        String localIp = NetworkUtils.getLocalIpAddress(this);
+        String addressLabel = "0.0.0.0".equals(localIp) ? "无局域网地址" : localIp;
+        tvSenderName.setText("等待投屏… IP: " + addressLabel);
+        Toast.makeText(this, "等待投屏连接…\n本机IP: " + addressLabel, Toast.LENGTH_LONG).show();
 
 
 
@@ -202,7 +222,12 @@ public class ReceiverActivity extends AppCompatActivity
 
             @Override public void onConnected(com.localcast.pro.core.DeviceInfo d) {
 
-                runOnUiThread(() -> tvSenderName.setText("接收自 " + d.getDeviceName()));
+                runOnUiThread(() -> {
+                    tvSenderName.setText("接收自 " + d.getDeviceName());
+                    pairingQr.setVisibility(View.GONE);
+                    btnRemoteControl.setVisibility(castManager.getConnectionManager().isControlPaired()
+                            ? View.VISIBLE : View.GONE);
+                });
 
             }
 
@@ -210,9 +235,15 @@ public class ReceiverActivity extends AppCompatActivity
 
                 runOnUiThread(() -> {
 
-                    String localIp = NetworkUtils.getLocalIpAddress();
-
-                    tvSenderName.setText("等待投屏… IP: " + localIp);
+                    String localIp = NetworkUtils.getLocalIpAddress(ReceiverActivity.this);
+                    tvSenderName.setText("等待投屏… IP: "
+                            + ("0.0.0.0".equals(localIp) ? "无局域网地址" : localIp));
+                    remoteControlMode = false;
+                    btnRemoteControl.setText("控制");
+                    btnRemoteControl.setVisibility(View.GONE);
+                    btnRemoteBack.setVisibility(View.GONE);
+                    btnRemoteHome.setVisibility(View.GONE);
+                    pairingQr.setVisibility(View.VISIBLE);
 
                     Toast.makeText(ReceiverActivity.this,
 
@@ -905,6 +936,34 @@ public class ReceiverActivity extends AppCompatActivity
 
 
 
+    private void showPairingQr() {
+        String ip = NetworkUtils.getLocalIpAddress(this);
+        TextView address = findViewById(R.id.tv_pair_address);
+        ImageView image = findViewById(R.id.iv_pair_qr);
+        pairingQr.setVisibility(View.VISIBLE);
+        if ("0.0.0.0".equals(ip)) {
+            address.setText("未获得 Wi-Fi 地址，请检查连接并重新打开此页");
+            image.setVisibility(View.GONE);
+            return;
+        }
+        castManager.getLocalDevice().setIpAddress(ip);
+        String token = castManager.getConnectionManager().rotatePairingToken();
+        try {
+            BitMatrix qr = new MultiFormatWriter().encode(
+                    PairingCode.create(ip, token), BarcodeFormat.QR_CODE, 320, 320);
+            Bitmap bitmap = Bitmap.createBitmap(320, 320, Bitmap.Config.ARGB_8888);
+            for (int y = 0; y < 320; y++)
+                for (int x = 0; x < 320; x++)
+                    bitmap.setPixel(x, y, qr.get(x, y) ? Color.BLACK : Color.WHITE);
+            image.setImageBitmap(bitmap);
+            image.setVisibility(View.VISIBLE);
+            address.setText(ip + " · 本次会话有效");
+        } catch (Exception e) {
+            address.setText("二维码生成失败，请使用手动连接");
+            image.setVisibility(View.GONE);
+        }
+    }
+
     private void setupControls() {
 
         btnDisplayMode.setOnClickListener(v -> {
@@ -927,9 +986,25 @@ public class ReceiverActivity extends AppCompatActivity
 
         });
 
-
-
+        btnRemoteControl.setOnClickListener(v -> {
+            remoteControlMode = !remoteControlMode;
+            btnRemoteControl.setText(remoteControlMode ? "退出控制" : "控制");
+            btnRemoteBack.setVisibility(remoteControlMode ? View.VISIBLE : View.GONE);
+            btnRemoteHome.setVisibility(remoteControlMode ? View.VISIBLE : View.GONE);
+            if (remoteControlMode) {
+                requestDisplayMode(ReceiverManager.DISPLAY_MODE_FIT);
+                showBars();
+                Toast.makeText(this, "请先在被控手机上允许本次控制", Toast.LENGTH_LONG).show();
+            }
+        });
+        btnRemoteBack.setOnClickListener(v -> sendRemoteAction("back"));
+        btnRemoteHome.setOnClickListener(v -> sendRemoteAction("home"));
         tvDisplay.setOnTouchListener((v, e) -> {
+
+            if (remoteControlMode) {
+                handleRemoteTouch(e);
+                return true;
+            }
 
             gestureDetector.onTouchEvent(e);
 
@@ -952,6 +1027,53 @@ public class ReceiverActivity extends AppCompatActivity
     }
 
 
+
+    private void sendRemoteAction(String action) {
+        try {
+            JSONObject command = new JSONObject().put("action", action);
+            inputExecutor.execute(() -> castManager.sendRemoteInput(command));
+        } catch (Exception ignored) { }
+    }
+
+    private void handleRemoteTouch(MotionEvent event) {
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_POINTER_DOWN || action == MotionEvent.ACTION_CANCEL) {
+            controlStart = null;
+            return;
+        }
+        if (action == MotionEvent.ACTION_DOWN) {
+            controlStart = normalizedPoint(event);
+            controlDownTime = event.getEventTime();
+        } else if (action == MotionEvent.ACTION_UP && controlStart != null) {
+            float[] end = normalizedPoint(event);
+            if (end != null) {
+                try {
+                    boolean tap = Math.hypot(end[0] - controlStart[0], end[1] - controlStart[1]) < 0.015;
+                    JSONObject command = new JSONObject()
+                            .put("action", tap ? "tap" : "swipe")
+                            .put("x1", controlStart[0]).put("y1", controlStart[1]);
+                    if (!tap) command.put("x2", end[0]).put("y2", end[1])
+                            .put("duration", Math.max(50, Math.min(1500,
+                                    event.getEventTime() - controlDownTime)));
+                    inputExecutor.execute(() -> castManager.sendRemoteInput(command));
+                } catch (Exception ignored) { }
+            }
+            controlStart = null;
+        }
+    }
+
+    private float[] normalizedPoint(MotionEvent event) {
+        int width = tvDisplay.getWidth(), height = tvDisplay.getHeight();
+        if (width < 1 || height < 1) return null;
+        Matrix inverse = new Matrix();
+        if (!tvDisplay.getTransform(new Matrix()).invert(inverse)) return null;
+        float[] point = {event.getX(), event.getY()};
+        inverse.mapPoints(point);
+        point[0] /= width;
+        point[1] /= height;
+        if (point[0] < 0 || point[0] > 1 || point[1] < 0 || point[1] > 1) return null;
+        return point;
+    }
 
     private void toggleBars() { if (barsVisible) hideBarsNow(); else showBars(); }
 
@@ -998,6 +1120,7 @@ public class ReceiverActivity extends AppCompatActivity
     protected void onDestroy() {
 
         stopReceiverAdvertisement();
+        inputExecutor.shutdownNow();
         super.onDestroy();
 
         tvDisplay.removeCallbacks(hideBars);
@@ -1013,6 +1136,7 @@ public class ReceiverActivity extends AppCompatActivity
 
     private void stopReceiverAdvertisement() {
         DeviceManager.setReceiverAvailable(false);
+        if (castManager != null) castManager.getConnectionManager().clearPairingToken();
         if (receiverAdvertiser != null) {
             receiverAdvertiser.unregisterService();
             receiverAdvertiser = null;

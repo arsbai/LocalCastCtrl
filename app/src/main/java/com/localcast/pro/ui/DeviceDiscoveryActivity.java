@@ -36,7 +36,8 @@ public class DeviceDiscoveryActivity extends AppCompatActivity {
 
         if (castManager != null) {
             tvLocalDevice.setText("本机: " + castManager.getLocalDevice().getDeviceName());
-            tvLocalIp.setText("IP: " + NetworkUtils.getLocalIpAddress());
+            String ip = NetworkUtils.getLocalIpAddress(this);
+            tvLocalIp.setText("IP: " + ("0.0.0.0".equals(ip) ? "无局域网地址" : ip));
         }
 
         cardSenderMode.setOnClickListener(v -> finish());
@@ -49,7 +50,7 @@ public class DeviceDiscoveryActivity extends AppCompatActivity {
             if (castManager != null) {
                 castManager.getConnectionManager().startAsServer();
                 Toast.makeText(this,
-                        "接收服务已启动\n本机IP: " + NetworkUtils.getLocalIpAddress(),
+                        "接收服务已启动\n本机IP: " + NetworkUtils.getLocalIpAddress(this),
                         Toast.LENGTH_LONG).show();
             }
 

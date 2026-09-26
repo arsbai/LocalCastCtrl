@@ -3,6 +3,7 @@ package com.localcast.pro.core;
 import android.content.Context;
 import android.net.nsd.NsdManager;
 import android.net.nsd.NsdServiceInfo;
+import android.net.wifi.WifiManager;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
@@ -37,7 +38,7 @@ public class DeviceManager {
     private static final String TAG = "DeviceManager";
 
     // mDNS服务信息
-    private static final String SERVICE_TYPE = "_localcast._tcp.local.";
+    private static final String SERVICE_TYPE = "_localcast._tcp.";
     private static final String SERVICE_NAME_PREFIX = "LocalCastPro-";
 
     // UDP广播
@@ -56,6 +57,7 @@ public class DeviceManager {
     private NsdManager nsdManager;
     private NsdManager.RegistrationListener registrationListener;
     private NsdManager.DiscoveryListener discoveryListener;
+    private WifiManager.MulticastLock multicastLock;
 
     // 广播
     private DatagramSocket broadcastSocket;
@@ -102,6 +104,7 @@ public class DeviceManager {
             Logger.e(TAG, "NsdManager is null");
             return;
         }
+        acquireMulticast();
 
         NsdServiceInfo serviceInfo = new NsdServiceInfo();
         serviceInfo.setServiceName(SERVICE_NAME_PREFIX + localDevice.getDeviceId());
@@ -110,9 +113,11 @@ public class DeviceManager {
 
         // 设置设备信息为TXT记录
         try {
-            JSONObject json = localDevice.toJson();
-            Map<String, String> txtMap = new java.util.HashMap<>();
-            txtMap.put("info", json.toString());
+            // One DNS-SD TXT value is limited to 255 bytes. Keep only identity.
+            JSONObject json = new JSONObject();
+            json.put("deviceId", localDevice.getDeviceId());
+            json.put("deviceName", localDevice.getDeviceName());
+            json.put("deviceType", localDevice.getDeviceType());
             serviceInfo.setAttribute("info", json.toString());
         } catch (Exception e) {
             Logger.e(TAG, "Failed to set service attributes", e);
@@ -140,7 +145,13 @@ public class DeviceManager {
             }
         };
 
-        nsdManager.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, registrationListener);
+        try {
+            nsdManager.registerService(serviceInfo, NsdManager.PROTOCOL_DNS_SD, registrationListener);
+        } catch (RuntimeException e) {
+            Logger.e(TAG, "mDNS registration could not start", e);
+            registrationListener = null;
+            releaseMulticastIfIdle();
+        }
     }
 
     /**
@@ -154,6 +165,8 @@ public class DeviceManager {
                 Logger.e(TAG, "Failed to unregister mDNS service", e);
             }
         }
+        registrationListener = null;
+        releaseMulticastIfIdle();
     }
 
     /**
@@ -236,6 +249,7 @@ public class DeviceManager {
 
     private void startNsdDiscovery() {
         if (nsdManager == null) return;
+        acquireMulticast();
 
         discoveryListener = new NsdManager.DiscoveryListener() {
             @Override
@@ -298,7 +312,13 @@ public class DeviceManager {
             }
         };
 
-        nsdManager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener);
+        try {
+            nsdManager.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, discoveryListener);
+        } catch (RuntimeException e) {
+            Logger.e(TAG, "mDNS discovery could not start", e);
+            discoveryListener = null;
+            releaseMulticastIfIdle();
+        }
     }
 
     private void stopNsdDiscovery() {
@@ -308,6 +328,30 @@ public class DeviceManager {
             } catch (Exception e) {
                 Logger.e(TAG, "Failed to stop mDNS discovery", e);
             }
+        }
+        discoveryListener = null;
+        releaseMulticastIfIdle();
+    }
+
+    private synchronized void acquireMulticast() {
+        if (multicastLock != null) return;
+        WifiManager wifi = (WifiManager) context.getSystemService(Context.WIFI_SERVICE);
+        if (wifi == null) return;
+        try {
+            multicastLock = wifi.createMulticastLock("LocalCastDiscovery");
+            multicastLock.setReferenceCounted(false);
+            multicastLock.acquire();
+        } catch (RuntimeException e) {
+            Logger.e(TAG, "Cannot acquire multicast lock", e);
+            multicastLock = null;
+        }
+    }
+
+    private synchronized void releaseMulticastIfIdle() {
+        if (registrationListener != null || discoveryListener != null) return;
+        if (multicastLock != null) {
+            multicastLock.release();
+            multicastLock = null;
         }
     }
 
@@ -414,7 +458,7 @@ public class DeviceManager {
                 String senderIp = packet.getAddress().getHostAddress();
 
                 // 忽略自己的广播
-                String localIp = NetworkUtils.getLocalIpAddress();
+                String localIp = NetworkUtils.getLocalIpAddress(context);
                 if (localIp.equals(senderIp)) continue;
 
                 if (BROADCAST_MESSAGE.equals(message) && receiverAvailable) {

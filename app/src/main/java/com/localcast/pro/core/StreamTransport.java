@@ -31,6 +31,7 @@ public class StreamTransport {
     public static final byte TYPE_AUDIO = 2;
     public static final byte TYPE_HEARTBEAT = 3;
     public static final byte TYPE_CONTROL = 4;
+    public static final byte TYPE_REMOTE_INPUT = 5;
 
     // 帧标志
     public static final byte FLAG_NONE = 0;
@@ -165,6 +166,10 @@ public class StreamTransport {
                 // 合理性检查
                 if (length < 0 || length > 10 * 1024 * 1024) {
                     Logger.e(TAG, "Invalid frame length: " + length + ", closing");
+                    break;
+                }
+                if (type == TYPE_REMOTE_INPUT && length > 256) {
+                    Logger.e(TAG, "Oversized remote input, closing");
                     break;
                 }
 
