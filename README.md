@@ -6,15 +6,7 @@
 
 [下载本衍生版 APK](https://github.com/arsbai/LocalCastCtrl/releases/tag/v1.1.1-dev) · [查看原作者发布的版本](https://github.com/cwe88108/LocalCastPro/releases)
 
-> 原作者的 V1.0.10 安装包不包含本文新增的扫码与远程控制功能。请在两台手机上安装本仓库发布的同一版本 APK。它是调试签名的预览版，可与原版并存；当前功能尚未经真机双机验证。
-
-## 界面预览
-
-| 首页 | 设置 | 刷新率选项 |
-| :---: | :---: | :---: |
-| <img src="docs/images/home-v1.0.10-sanitized.jpg" width="240" alt="LocalCastPro 首页，网络信息已脱敏"> | <img src="docs/images/settings-v1.0.10.jpg" width="240" alt="LocalCastPro 设置页"> | <img src="docs/images/fps-options-v1.0.10.jpg" width="240" alt="30、60、120 fps 选项"> |
-
-首页图片根据真实界面截图移除了设备网络信息，属于**脱敏示意图**；设置页和刷新率选项为真机截图。
+> 原作者的 V1.0.10 安装包不包含本文新增的扫码与远程控制功能。
 
 ## 快速使用
 
