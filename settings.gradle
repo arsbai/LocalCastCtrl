@@ -19,5 +19,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "LocalCastPro"
+rootProject.name = "LocalCastCtrl"
 include ':app'

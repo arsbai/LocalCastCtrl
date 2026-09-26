@@ -16,8 +16,8 @@ android {
         applicationId "com.localcast.pro"
         minSdk 24
         targetSdk 34
-        versionCode 12
-        versionName "1.1.0-dev"
+        versionCode 13
+        versionName "1.1.1-dev"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 

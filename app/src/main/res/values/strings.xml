@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="remote_control_service_label">投屏神器远程控制</string>
+    <string name="remote_control_service_label">局域投屏控制LocalCastCtrl远程控制</string>
     <string name="remote_control_service_description">仅在本机主动允许的扫码投屏会话中，执行另一台手机发来的点击、滑动、返回和主页操作。</string>
-    <string name="app_name">投屏神器</string>
-    <string name="app_name_en">LocalCast Pro</string>
+    <string name="app_name">局域投屏控制LocalCastCtrl</string>
+    <string name="app_name_en">LocalCastCtrl</string>
     <string name="device_discovery">设备发现</string>
     <string name="start_casting">开始投屏</string>
     <string name="stop_casting">结束投屏</string>
@@ -50,5 +50,5 @@
     <string name="display_mode_stretch">全屏拉伸</string>
     <string name="display_mode_original">原始尺寸</string>
     <string name="channel_notification">投屏服务</string>
-    <string name="channel_description">投屏神器前台服务通知</string>
+    <string name="channel_description">局域投屏控制LocalCastCtrl前台服务通知</string>
 </resources>

@@ -226,7 +226,7 @@ public class SenderActivity extends AppCompatActivity {
         if (!RemoteControlService.isAvailable()) {
             new MaterialAlertDialogBuilder(this)
                     .setTitle("开启本机远程控制服务")
-                    .setMessage("请在系统无障碍设置中手动启用“投屏神器远程控制”，返回后再次点击允许。本服务只在您批准的当前投屏会话中执行操作。")
+                    .setMessage("请在系统无障碍设置中手动启用“局域投屏控制LocalCastCtrl远程控制”，返回后再次点击允许。本服务只在您批准的当前投屏会话中执行操作。")
                     .setPositiveButton("打开系统设置", (d, w) ->
                             startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)))
                     .setNegativeButton("取消", null).show();

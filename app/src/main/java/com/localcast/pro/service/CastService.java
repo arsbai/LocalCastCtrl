@@ -243,7 +243,7 @@ public class CastService extends Service {
 
         NotificationCompat.Builder builder = new NotificationCompat.Builder(
                 this, LocalCastApplication.getNotificationChannelId())
-                .setContentTitle("投屏神器")
+                .setContentTitle(getString(R.string.app_name))
                 .setContentText(statusText)
                 .setSmallIcon(android.R.drawable.ic_menu_slideshow)
                 .setContentIntent(pendingIntent)

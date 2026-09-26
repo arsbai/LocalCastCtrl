@@ -14,14 +14,14 @@ import com.localcast.pro.core.CastManager;
 import com.localcast.pro.utils.Logger;
 
 /**
- * 投屏神器 Application
+ * LocalCastCtrl Application
  * 负责全局初始化：日志系统、通知渠道、CastManager全局持有
  */
 public class LocalCastApplication extends Application {
 
     private static final String CHANNEL_ID = "localcast_cast";
     private static final String CHANNEL_NAME = "投屏服务";
-    private static final String CHANNEL_DESC = "投屏神器前台服务通知";
+    private static final String CHANNEL_DESC = "局域投屏控制LocalCastCtrl前台服务通知";
 
     private static LocalCastApplication instance;
     private static Handler mainHandler;

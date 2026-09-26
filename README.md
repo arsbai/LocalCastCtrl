@@ -1,10 +1,10 @@
-# LocalCastPro（投屏神器）
+# 局域投屏控制LocalCastCtrl
 
 > 本仓库是 [cwe88108 原作 LocalCastPro](https://github.com/cwe88108/LocalCastPro) 的衍生版本。感谢原作者 **cwe88108** 开发并以 Apache License 2.0 开放源码。本仓库保留原项目的提交历史和 [LICENSE](LICENSE)，新增局域网扫码配对、手机间控制及网络发现修复。原版安装包由原作者发布；本仓库的构建与修改由本衍生版本负责。
 
 一款用于 **Android 设备之间局域网投屏** 的应用：让手机或平板作为发送端，把画面投到另一台 Android 手机、平板、电视或电视盒子上。它以低延迟体验为目标；**当前版本免费、无广告**。
 
-[下载本衍生版 APK](https://github.com/arsbai/LocalCastPro/releases/tag/v1.1.0-dev) · [查看原作者发布的版本](https://github.com/cwe88108/LocalCastPro/releases) · [反馈问题](https://github.com/arsbai/LocalCastPro/issues)
+[下载本衍生版 APK](https://github.com/arsbai/LocalCastCtrl/releases/tag/v1.1.1-dev) · [查看原作者发布的版本](https://github.com/cwe88108/LocalCastPro/releases)
 
 > 原作者的 V1.0.10 安装包不包含本文新增的扫码与远程控制功能。请在两台手机上安装本仓库发布的同一版本 APK。它是调试签名的预览版，可与原版并存；当前功能尚未经真机双机验证。
 
