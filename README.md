@@ -12,11 +12,11 @@
 
 ## 界面预览
 
-| 首页 | 设置 | 刷新率选项 |
+| 首页 | 接收端扫码配对 | 视频设置与帧率 |
 | :---: | :---: | :---: |
-| <img src="docs/images/home-v1.0.10-sanitized.jpg" width="240" alt="LocalCastPro 首页，网络信息已脱敏"> | <img src="docs/images/settings-v1.0.10.jpg" width="240" alt="LocalCastPro 设置页"> | <img src="docs/images/fps-options-v1.0.10.jpg" width="240" alt="30、60、120 fps 选项"> |
+| <img src="docs/images/localcastctrl-home-sanitized.png" width="240" alt="LocalCastCtrl 首页，IP 已遮盖"> | <img src="docs/images/localcastctrl-receiver-sanitized.png" width="240" alt="LocalCastCtrl 接收端扫码配对页，IP 和二维码已遮盖"> | <img src="docs/images/localcastctrl-video-settings.jpg" width="240" alt="LocalCastCtrl 视频设置，30、60、120 fps 选项"> |
 
-首页图片根据真实界面截图移除了设备网络信息，属于**脱敏示意图**；设置页和刷新率选项为真机截图。
+以上预览均来自 LocalCastCtrl 真机截图；公开展示时已遮盖设备 IP 和一次性配对二维码。
 
 ## 快速使用
 
