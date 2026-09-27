@@ -247,11 +247,11 @@ public class SenderManager {
     }
 
     public void pauseCasting() {
-        pauseCaptureForScreenOff();
+        pauseCapture();
     }
 
     public void resumeCasting() {
-        resumeCaptureAfterUnlock();
+        resumeCapture();
     }
 
     private void registerScreenStateReceiver() {
@@ -261,9 +261,16 @@ public class SenderManager {
             public void onReceive(Context ctx, Intent intent) {
                 if (intent == null || intent.getAction() == null) return;
                 if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) {
-                    pauseCaptureForScreenOff();
+                    // A display turning off is not the same as ending the cast.
+                    // Keep the MediaProjection surface attached so devices that
+                    // continue rendering can still be viewed and controlled.
+                    // If Android locks the device, projectionCallback.onStop()
+                    // handles the revoked capture session separately.
+                    Logger.i(TAG, "Display turned off; keeping capture active");
                 } else if (Intent.ACTION_SCREEN_ON.equals(intent.getAction())) {
-                    resumeCaptureAfterUnlock();
+                    // Do not undo a pause chosen by the user. A fresh key frame
+                    // helps the receiver recover when the display wakes.
+                    if (!capturePaused.get()) requestKeyFrame();
                 }
             }
         };
@@ -283,10 +290,10 @@ public class SenderManager {
         screenStateReceiver = null;
     }
 
-    /** 锁屏时暂停 VirtualDisplay，不中断 TCP 连接 */
-    private void pauseCaptureForScreenOff() {
+    /** Explicit pause requested by the sender; screen-off never calls this. */
+    private void pauseCapture() {
         if (!running.get() || capturePaused.getAndSet(true)) return;
-        Logger.i(TAG, "Pausing screen capture (screen off / projection paused)");
+        Logger.i(TAG, "Pausing screen capture at sender request");
         if (senderHandler != null) {
             senderHandler.post(() -> {
                 if (virtualDisplay != null) {
@@ -306,10 +313,10 @@ public class SenderManager {
         }
     }
 
-    /** 解锁后重建 VirtualDisplay，恢复投屏画面 */
-    private void resumeCaptureAfterUnlock() {
+    /** Resume the existing VirtualDisplay after an explicit sender pause. */
+    private void resumeCapture() {
         if (!running.get() || !capturePaused.getAndSet(false)) return;
-        Logger.i(TAG, "Resuming screen capture after unlock");
+        Logger.i(TAG, "Resuming screen capture at sender request");
         if (senderHandler == null || mediaProjection == null || videoEncoder == null) {
             capturePaused.set(true);
             return;
@@ -329,7 +336,7 @@ public class SenderManager {
             try {
                 virtualDisplay.setSurface(inputSurface);
                 videoEncoder.requestKeyFrame();
-                Logger.i(TAG, "VirtualDisplay surface restored after unlock");
+                Logger.i(TAG, "VirtualDisplay surface restored after pause");
             } catch (Exception e) {
                 Logger.e(TAG, "Failed to restore VirtualDisplay", e);
                 capturePaused.set(true);
@@ -579,16 +586,16 @@ public class SenderManager {
 
         // 尝试用户/默认选定的模式；系统音频在部分 OEM 上静默失败，失败则降级到麦克风
         audioEncoder.setAudioMode(audioMode);
-        Logger.i(TAG, "Audio config: mode=" + audioMode + ", quality=" + quality + 
+        Logger.i(TAG, "Audio config: mode=" + audioMode + ", quality=" + quality +
                  ", bitrate=" + (bitrate / 1000) + "kbps");
 
         if (!audioEncoder.start()) {
             Logger.e(TAG, "❌ Audio encoder start FAILED for mode: " + audioMode);
-            
+
             if (audioMode == AudioEncoder.AudioMode.SYSTEM_AUDIO) {
                 Logger.w(TAG, "System audio failed, attempting fallback to MICROPHONE");
                 try { audioEncoder.release(); } catch (Exception ignored) {}
-                
+
                 audioEncoder = new AudioEncoder();
                 audioEncoder.setContext(context);
                 audioEncoder.setMediaProjection(mediaProjection);
@@ -732,14 +739,14 @@ public class SenderManager {
         System.arraycopy(data, offset, audioData, 0, size);
 
         boolean success = transport.sendFrame(StreamTransport.TYPE_AUDIO, pts, StreamTransport.FLAG_NONE, audioData, size);
-        
+
         if (!success) {
             Logger.w(TAG, "⚠️ Failed to send audio frame: size=" + size + ", pts=" + pts);
         }
-        
+
         // 每次发送都记录(前10帧),之后每50帧记录一次
         if (frameCount.get() < 10 || frameCount.get() % 50 == 0) {
-            Logger.d(TAG, "📤 Audio frame sent #" + frameCount.get() + 
+            Logger.d(TAG, "📤 Audio frame sent #" + frameCount.get() +
                      ": size=" + size + " bytes, success=" + success);
         }
     }

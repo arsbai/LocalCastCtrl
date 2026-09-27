@@ -2,7 +2,7 @@ package com.localcast.pro.core;
 
 import com.localcast.pro.utils.NetworkUtils;
 
-/** Small, strictly parsed QR payload. The secret only authorizes control pairing. */
+/** Small, strictly parsed QR payload used to verify the chosen receiver. */
 public final class PairingCode {
     private static final String PREFIX = "localcast://pair/";
     public final String ip;

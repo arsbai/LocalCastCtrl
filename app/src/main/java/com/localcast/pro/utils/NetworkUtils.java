@@ -14,9 +14,14 @@ import android.os.Build;
 
 import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.net.InterfaceAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
 import java.util.Enumeration;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
 
 /**
  * 网络工具类
@@ -56,7 +61,7 @@ public class NetworkUtils {
         return "0.0.0.0";
     }
 
-    /** Prefer the Wi-Fi network itself: the default network may be cellular or VPN. */
+    /** Prefer the Wi-Fi client address displayed to a phone on the same LAN. */
     public static String getLocalIpAddress(Context context) {
         ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
         if (cm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -77,24 +82,26 @@ public class NetworkUtils {
             WifiInfo info = wifi.getConnectionInfo();
             if (info != null && info.getIpAddress() != 0) return intToIp(info.getIpAddress());
         }
-        // Some devices omit LinkProperties. Only inspect Wi-Fi interfaces here,
-        // since a cellular/VPN address cannot be used by the other phone.
+        // A phone providing a hotspot is not itself a Wi-Fi client. Use its
+        // AP address when there is no connected Wi-Fi client address.
+        String hotspotAddress = getHotspotInterfaceAddress();
+        if (hotspotAddress != null) return hotspotAddress;
+        // OEMs may name the AP interface wlan/swlan rather than softap/ap/bridge.
         try {
             Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
-            while (interfaces.hasMoreElements()) {
+            while (interfaces != null && interfaces.hasMoreElements()) {
                 NetworkInterface nic = interfaces.nextElement();
-                String name = nic.getName().toLowerCase(java.util.Locale.US);
-                if (!nic.isUp() || !(name.startsWith("wlan") || name.startsWith("wifi")
-                        || name.startsWith("swlan"))) continue;
+                if (!isLocalWirelessInterface(nic)) continue;
                 Enumeration<InetAddress> addresses = nic.getInetAddresses();
                 while (addresses.hasMoreElements()) {
                     InetAddress address = addresses.nextElement();
                     if (address instanceof Inet4Address && !address.isLoopbackAddress()
-                            && !address.isLinkLocalAddress()) return address.getHostAddress();
+                            && !address.isLinkLocalAddress()
+                            && isPrivateIp(address.getHostAddress())) return address.getHostAddress();
                 }
             }
         } catch (SocketException e) {
-            Logger.e("NetworkUtils", "Failed to inspect Wi-Fi interface", e);
+            Logger.e("NetworkUtils", "Failed to inspect local wireless interface", e);
         }
         return "0.0.0.0";
     }
@@ -127,9 +134,13 @@ public class NetworkUtils {
      * 获取WiFi广播地址
      */
     public static String getBroadcastAddress(Context context) {
+        // When a phone shares a hotspot while also using upstream Wi-Fi,
+        // advertise on the hotspot subnet seen by the other phone.
+        String hotspotBroadcast = getHotspotInterfaceBroadcast();
+        if (hotspotBroadcast != null) return hotspotBroadcast;
         WifiManager wifiManager = (WifiManager) context.getApplicationContext()
                 .getSystemService(Context.WIFI_SERVICE);
-        if (wifiManager != null) {
+        if (wifiManager != null && isWifiConnected(context)) {
             DhcpInfo dhcpInfo = wifiManager.getDhcpInfo();
             if (dhcpInfo != null && dhcpInfo.ipAddress != 0 && dhcpInfo.netmask != 0) {
                 return intToIp(dhcpInfo.ipAddress | ~dhcpInfo.netmask);
@@ -156,7 +167,67 @@ public class NetworkUtils {
                 }
             }
         }
+        try {
+            Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+            while (interfaces != null && interfaces.hasMoreElements()) {
+                NetworkInterface nic = interfaces.nextElement();
+                if (!isLocalWirelessInterface(nic)) continue;
+                for (InterfaceAddress link : nic.getInterfaceAddresses()) {
+                    InetAddress address = link.getAddress();
+                    InetAddress broadcast = link.getBroadcast();
+                    if (address instanceof Inet4Address && broadcast instanceof Inet4Address
+                            && isPrivateIp(address.getHostAddress()))
+                        return broadcast.getHostAddress();
+                }
+            }
+        } catch (SocketException e) {
+            Logger.e("NetworkUtils", "Failed to inspect hotspot broadcast", e);
+        }
         return "255.255.255.255";
+    }
+
+    /** Discover on every wireless subnet when hotspot and Wi-Fi coexist. */
+    public static List<String> getBroadcastAddresses(Context context) {
+        LinkedHashSet<String> addresses = new LinkedHashSet<>();
+        addresses.add(getBroadcastAddress(context));
+        ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            for (Network network : cm.getAllNetworks()) {
+                NetworkCapabilities caps = cm.getNetworkCapabilities(network);
+                if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) continue;
+                LinkProperties props = cm.getLinkProperties(network);
+                if (props == null) continue;
+                for (LinkAddress link : props.getLinkAddresses()) {
+                    if (!(link.getAddress() instanceof Inet4Address)) continue;
+                    int prefix = link.getPrefixLength();
+                    if (prefix < 1 || prefix > 30) continue;
+                    byte[] ip = link.getAddress().getAddress();
+                    long value = ((ip[0] & 255L) << 24) | ((ip[1] & 255L) << 16)
+                            | ((ip[2] & 255L) << 8) | (ip[3] & 255L);
+                    long mask = (0xffffffffL << (32 - prefix)) & 0xffffffffL;
+                    long broadcast = value | (~mask & 0xffffffffL);
+                    addresses.add(((broadcast >> 24) & 255) + "." + ((broadcast >> 16) & 255)
+                            + "." + ((broadcast >> 8) & 255) + "." + (broadcast & 255));
+                }
+            }
+        }
+        try {
+            Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+            while (interfaces != null && interfaces.hasMoreElements()) {
+                NetworkInterface nic = interfaces.nextElement();
+                if (!isLocalWirelessInterface(nic)) continue;
+                for (InterfaceAddress link : nic.getInterfaceAddresses()) {
+                    InetAddress broadcast = link.getBroadcast();
+                    if (link.getAddress() instanceof Inet4Address
+                            && broadcast instanceof Inet4Address)
+                        addresses.add(broadcast.getHostAddress());
+                }
+            }
+        } catch (SocketException e) {
+            Logger.e("NetworkUtils", "Failed to list wireless broadcasts", e);
+        }
+        addresses.add("255.255.255.255");
+        return new ArrayList<>(addresses);
     }
 
     /**
@@ -233,9 +304,9 @@ public class NetworkUtils {
         return ip.matches(pattern);
     }
 
-    /** Allow local QR endpoints only while Wi-Fi is connected. */
-    public static boolean isOnSameWifi(Context context, String peerIp) {
-        if (!isValidIp(peerIp) || !isWifiConnected(context)) return false;
+    /** Return only a Wi-Fi network whose own subnet contains this peer. */
+    public static Network findWifiNetworkForPeer(Context context, String peerIp) {
+        if (!isValidIp(peerIp)) return null;
         try {
             byte[] peer = InetAddress.getByName(peerIp).getAddress();
             ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
@@ -249,32 +320,93 @@ public class NetworkUtils {
                         if (!(link.getAddress() instanceof Inet4Address)) continue;
                         byte[] own = link.getAddress().getAddress();
                         int prefix = link.getPrefixLength();
-                        if (prefix < 8 || prefix > 32) continue;
-                        boolean match = true;
-                        for (int bit = 0; bit < prefix; bit++) {
-                            int mask = 0x80 >> (bit % 8);
-                            if ((own[bit / 8] & mask) != (peer[bit / 8] & mask)) {
-                                match = false;
-                                break;
-                            }
-                        }
-                        if (match) return true;
+                        if (sameSubnet(own, peer, prefix)) return network;
                     }
                 }
             }
-            WifiManager wifi = (WifiManager) context.getApplicationContext()
-                    .getSystemService(Context.WIFI_SERVICE);
-            DhcpInfo dhcp = wifi != null ? wifi.getDhcpInfo() : null;
-            if (dhcp != null && dhcp.ipAddress != 0 && dhcp.netmask != 0) {
-                int peerLittleEndian = (peer[0] & 255) | ((peer[1] & 255) << 8)
-                        | ((peer[2] & 255) << 16) | ((peer[3] & 255) << 24);
-                if ((dhcp.ipAddress & dhcp.netmask) == (peerLittleEndian & dhcp.netmask))
-                    return true;
+        } catch (Exception ignored) { }
+        return null;
+    }
+
+    /** Wi-Fi client route to retry when Android prefers mobile data. */
+    public static Network findConnectedWifiNetwork(Context context) {
+        ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (cm == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null;
+        for (Network network : cm.getAllNetworks()) {
+            NetworkCapabilities caps = cm.getNetworkCapabilities(network);
+            if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) continue;
+            LinkProperties props = cm.getLinkProperties(network);
+            if (props == null) continue;
+            for (LinkAddress link : props.getLinkAddresses()) {
+                InetAddress address = link.getAddress();
+                if (address instanceof Inet4Address && !address.isLinkLocalAddress()
+                        && !address.isLoopbackAddress()) return network;
             }
-            // Routed private subnets can still belong to one Wi-Fi network.
-            return isPrivateIp(peerIp);
-        } catch (Exception ignored) {
-            return false;
         }
+        return null;
+    }
+
+    static boolean sameSubnet(byte[] own, byte[] peer, int prefix) {
+        if (own.length != 4 || peer.length != 4 || prefix < 8 || prefix > 32)
+            return false;
+        for (int bit = 0; bit < prefix; bit++) {
+            int mask = 0x80 >> (bit % 8);
+            if ((own[bit / 8] & mask) != (peer[bit / 8] & mask)) return false;
+        }
+        return true;
+    }
+
+    private static String getHotspotInterfaceAddress() {
+        try {
+            Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+            while (interfaces != null && interfaces.hasMoreElements()) {
+                NetworkInterface nic = interfaces.nextElement();
+                if (!nic.isUp() || nic.isLoopback()
+                        || !isHotspotInterfaceName(nic.getName().toLowerCase(Locale.US))) continue;
+                Enumeration<InetAddress> addresses = nic.getInetAddresses();
+                while (addresses.hasMoreElements()) {
+                    InetAddress address = addresses.nextElement();
+                    if (address instanceof Inet4Address
+                            && isPrivateIp(address.getHostAddress()))
+                        return address.getHostAddress();
+                }
+            }
+        } catch (SocketException e) {
+            Logger.e("NetworkUtils", "Failed to inspect hotspot interface", e);
+        }
+        return null;
+    }
+
+    private static String getHotspotInterfaceBroadcast() {
+        try {
+            Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+            while (interfaces != null && interfaces.hasMoreElements()) {
+                NetworkInterface nic = interfaces.nextElement();
+                if (!nic.isUp() || nic.isLoopback()
+                        || !isHotspotInterfaceName(nic.getName().toLowerCase(Locale.US))) continue;
+                for (InterfaceAddress link : nic.getInterfaceAddresses()) {
+                    InetAddress address = link.getAddress();
+                    InetAddress broadcast = link.getBroadcast();
+                    if (address instanceof Inet4Address && broadcast instanceof Inet4Address
+                            && isPrivateIp(address.getHostAddress()))
+                        return broadcast.getHostAddress();
+                }
+            }
+        } catch (SocketException e) {
+            Logger.e("NetworkUtils", "Failed to inspect hotspot broadcast", e);
+        }
+        return null;
+    }
+
+    private static boolean isHotspotInterfaceName(String name) {
+        return name.startsWith("softap") || name.matches("ap[0-9]+")
+                || name.startsWith("bridge") || name.matches("br[0-9]+");
+    }
+
+    private static boolean isLocalWirelessInterface(NetworkInterface nic) throws SocketException {
+        if (!nic.isUp() || nic.isLoopback()) return false;
+        String name = nic.getName().toLowerCase(Locale.US);
+        return name.startsWith("wlan") || name.startsWith("wifi")
+                || name.startsWith("swlan") || isHotspotInterfaceName(name);
     }
 }

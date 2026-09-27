@@ -26,11 +26,11 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * 设备发现管理器
- * 
+ *
  * 双通道发现机制：
  * 1. 主通道：mDNS/Bonjour (NsdManager) - 自动、高效
  * 2. 备用通道：UDP广播 (255.255.255.255:8888) - 兜底、兼容
- * 
+ *
  * 每5秒刷新一次设备列表，30秒未响应设备自动移除
  */
 public class DeviceManager {
@@ -333,6 +333,12 @@ public class DeviceManager {
         releaseMulticastIfIdle();
     }
 
+    /** Forget addresses learned on an earlier Wi-Fi or hotspot network. */
+    public void clearDiscoveredDevices() {
+        deviceMap.clear();
+        deviceList.clear();
+    }
+
     private synchronized void acquireMulticast() {
         if (multicastLock != null) return;
         WifiManager wifi = (WifiManager) context.getSystemService(Context.WIFI_SERVICE);
@@ -434,16 +440,17 @@ public class DeviceManager {
     }
 
     private void sendBroadcast() {
-        try {
-            String broadcastAddr = NetworkUtils.getBroadcastAddress(context);
-            byte[] data = BROADCAST_MESSAGE.getBytes();
-            DatagramPacket packet = new DatagramPacket(
-                    data, data.length,
-                    InetAddress.getByName(broadcastAddr), BROADCAST_PORT
-            );
-            broadcastSocket.send(packet);
-        } catch (IOException e) {
-            Logger.e(TAG, "Broadcast send failed", e);
+        byte[] data = BROADCAST_MESSAGE.getBytes();
+        for (String broadcastAddr : NetworkUtils.getBroadcastAddresses(context)) {
+            try {
+                DatagramPacket packet = new DatagramPacket(
+                        data, data.length,
+                        InetAddress.getByName(broadcastAddr), BROADCAST_PORT
+                );
+                broadcastSocket.send(packet);
+            } catch (IOException e) {
+                Logger.e(TAG, "Broadcast send failed to " + broadcastAddr, e);
+            }
         }
     }
 

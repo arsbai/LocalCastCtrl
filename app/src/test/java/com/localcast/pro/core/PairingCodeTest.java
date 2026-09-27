@@ -14,6 +14,12 @@ public class PairingCodeTest {
         assertEquals(TOKEN, code.token);
     }
 
+    @Test public void acceptsWifiAddressOutsideThreeCommonPrivateRanges() {
+        // A Wi-Fi router may assign a shared-address-space IPv4 address.
+        PairingCode code = PairingCode.parse(PairingCode.create("100.64.12.34", TOKEN));
+        assertEquals("100.64.12.34", code.ip);
+    }
+
     @Test public void rejectsUnexpectedOrUnusableCodes() {
         assertNull(PairingCode.parse("https://example.com/?token=" + TOKEN));
         assertNull(PairingCode.parse("localcast://pair/0.0.0.0/" + TOKEN));

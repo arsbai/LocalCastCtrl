@@ -32,6 +32,8 @@ public class ReceiverManager {
     public static final int DISPLAY_MODE_FIT = 0;
     /** 等比放大裁剪，保持投屏端比例并铺满屏幕（4K 电视全屏推荐） */
     public static final int DISPLAY_MODE_COVER = 1;
+    /** Immersive receiver window while preserving the entire source image. */
+    public static final int DISPLAY_MODE_FULLSCREEN_FIT = 4;
     /** 独立缩放 X/Y，可能变形但绝对铺满 */
     public static final int DISPLAY_MODE_STRETCH = 2;
     public static final int DISPLAY_MODE_ORIGINAL = 3;
@@ -132,11 +134,11 @@ public class ReceiverManager {
     }
 
     /**
-     * 更新 TextureView 实际可见区域尺寸（用于等比缩放/居中计算）。
-     * 使用 DisplayMetrics 会与 TextureView 真实尺寸不一致，导致视频偏移。
+     * 更新接收端窗口尺寸（用于等比缩放/居中计算）。
      */
     public void setViewSize(int width, int height) {
         if (width <= 0 || height <= 0) return;
+        if (screenWidth == width && screenHeight == height) return;
         this.screenWidth = width;
         this.screenHeight = height;
         recalculateDisplaySize();
@@ -319,7 +321,7 @@ public class ReceiverManager {
     public void setDisplayMode(int mode) {
         this.displayMode = mode;
         recalculateDisplaySize();
-        
+
         // 通知UI更新显示模式
         new Handler(Looper.getMainLooper()).post(() -> {
             if (stateListener != null) {
@@ -383,10 +385,10 @@ public class ReceiverManager {
                 System.arraycopy(data, 0, pendingVideoConfig, 0, length);
                 pendingVideoConfigLength = length;
                 pendingVideoConfigPts = timestamp;
-                Logger.i(TAG, "Video decoder not ready, cached CSD config frame (" + 
+                Logger.i(TAG, "Video decoder not ready, cached CSD config frame (" +
                          length + " bytes, pts=" + timestamp + ")");
             } else {
-                Logger.w(TAG, "Dropping video frame before decoder ready: isConfig=" + 
+                Logger.w(TAG, "Dropping video frame before decoder ready: isConfig=" +
                          isConfig + ", length=" + length);
             }
             return;
@@ -414,7 +416,7 @@ public class ReceiverManager {
             Logger.w(TAG, "⚠️ Received audio frame but decoder is NOT RUNNING");
             return;
         }
-        
+
         Logger.d(TAG, "📥 Received audio frame: length=" + length + ", pts=" + timestamp);
         audioDecoder.queueInput(data, 0, length, timestamp);
     }
@@ -433,9 +435,9 @@ public class ReceiverManager {
         Logger.i(TAG, "Received control command: type=" + commandType);
 
         switch (commandType) {
-            case 1: // fullscreen_enter: 保持投屏端比例铺满 4K/全屏
-                setDisplayMode(DISPLAY_MODE_COVER);
-                Logger.i(TAG, "Remote fullscreen -> cover mode");
+            case 1: // Older senders used this command for cropped fullscreen.
+                setDisplayMode(DISPLAY_MODE_FULLSCREEN_FIT);
+                Logger.i(TAG, "Remote fullscreen -> fit mode");
                 break;
             case 2: // fullscreen_exit
                 setDisplayMode(DISPLAY_MODE_FIT);
@@ -476,7 +478,7 @@ public class ReceiverManager {
                     }
                 });
             });
-            videoDecoder.setOnErrorListener(e -> notifyError("视频解码错误: " + 
+            videoDecoder.setOnErrorListener(e -> notifyError("视频解码错误: " +
                 (e != null ? e.getMessage() : "未知错误")));
 
             if (!videoDecoder.configure(codecMime, decoderSurface, width, height, pendingVideoConfig, pendingVideoConfigLength)) {
@@ -536,6 +538,7 @@ public class ReceiverManager {
                 displayHeight = videoHeight;
                 break;
             case DISPLAY_MODE_FIT:
+            case DISPLAY_MODE_FULLSCREEN_FIT:
             default:
                 float videoRatio = (float) videoWidth / videoHeight;
                 float screenRatio = (float) screenWidth / screenHeight;

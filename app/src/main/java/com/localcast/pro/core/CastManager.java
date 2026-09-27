@@ -165,7 +165,8 @@ public class CastManager {
                     transport.setOnFrameReceivedListener((type, timestamp, flags, data, length) -> {
                         connectionManager.updateHeartbeat();
                         if (type == StreamTransport.TYPE_REMOTE_INPUT && remoteControlAllowed
-                                && connectionManager.isControlPaired() && data != null
+                                && connectionManager.getState() == ConnectionManager.ConnectionState.CONNECTED
+                                && data != null
                                 && length > 0 && length <= 256) {
                             RemoteControlService.dispatch(data, length);
                         }
@@ -410,6 +411,7 @@ public class CastManager {
     private void stopCurrentModeInternal(boolean stopService) {
         Logger.i(TAG, "Stopping mode: " + currentMode);
         CastMode modeBeforeStop = currentMode;
+        RemoteControlService.restoreLocalDisplay();
 
         if (senderManager != null) {
             try { senderManager.stopCasting(); } catch (Exception e) { Logger.e(TAG, "Stop sender error", e); }
@@ -479,16 +481,20 @@ public class CastManager {
 
     public void setRemoteControlAllowed(boolean allowed) {
         remoteControlAllowed = allowed && currentMode == CastMode.SENDING
-                && connectionManager.isControlPaired() && RemoteControlService.isAvailable();
+                && connectionManager.getState() == ConnectionManager.ConnectionState.CONNECTED
+                && RemoteControlService.isAvailable();
+        if (!remoteControlAllowed) RemoteControlService.restoreLocalDisplay();
     }
 
     public boolean isRemoteControlAllowed() {
         return remoteControlAllowed && RemoteControlService.isAvailable();
     }
 
-    /** Receiver input travels backwards on the paired media socket. */
+    /** Receiver input travels backwards on the active media socket. */
     public boolean sendRemoteInput(JSONObject command) {
-        if (currentMode != CastMode.RECEIVING || !connectionManager.isControlPaired()) return false;
+        if (currentMode != CastMode.RECEIVING
+                || connectionManager.getState() != ConnectionManager.ConnectionState.CONNECTED)
+            return false;
         StreamTransport transport = connectionManager.getStreamTransport();
         if (transport == null || !transport.isRunning()) return false;
         byte[] payload = command.toString().getBytes(StandardCharsets.UTF_8);

@@ -1,14 +1,12 @@
-name: Build LocalCastCtrl APK
+name: Build LocalCastCtrl 1.1.5-dev
 
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - '.github/workflows/**'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -16,17 +14,6 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
-      - name: Apply uploaded source changes
-        run: |
-          if [ -f LocalCastCtrl-rename.patch ]; then
-            git apply LocalCastCtrl-rename.patch
-            rm LocalCastCtrl-rename.patch
-            git add -A
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git commit -m 'Rename app to LocalCastCtrl'
-            git push origin HEAD:main
-          fi
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -36,27 +23,12 @@ jobs:
         run: |
           chmod +x gradlew
           ./gradlew --no-daemon testDebugUnitTest assembleDebug
-      - name: Prepare APK
-        run: cp app/build/outputs/apk/debug/app-debug.apk LocalCastCtrl-1.1.1-dev.apk
+      # CI uses its own debug key. The release APK is uploaded separately so
+      # users can update the earlier locally signed experiment build.
+      - name: Prepare CI APK
+        run: cp app/build/outputs/apk/debug/app-debug.apk LocalCastCtrl-1.1.5-dev-ci.apk
       - uses: actions/upload-artifact@v7
         with:
-          name: LocalCastCtrl-1.1.1-dev
-          path: LocalCastCtrl-1.1.1-dev.apk
+          name: LocalCastCtrl-1.1.5-dev-ci
+          path: LocalCastCtrl-1.1.5-dev-ci.apk
           if-no-files-found: error
-      - name: Publish APK as prerelease
-        if: github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          cat > release-notes.md <<'EOF'
-          局域投屏控制LocalCastCtrl 基于 cwe88108/LocalCastPro 开发。感谢原作者 cwe88108，并保留原仓库的 Apache License 2.0 许可及提交历史。
-
-          新增同一 Wi-Fi 下的二维码配对、手机间屏幕控制，并修复部分设备显示 0.0.0.0 及发现失败的问题。
-
-          两台手机都安装此 APK。此包是调试签名的预览版，包名为 com.localcast.pro.dev，可与原版共存。控制功能须由被控手机在每次会话中明确授权，并启用本应用的无障碍服务。当前未经真机双机验证。
-          EOF
-          if gh release view v1.1.1-dev >/dev/null 2>&1; then
-            gh release upload v1.1.1-dev LocalCastCtrl-1.1.1-dev.apk --clobber
-          else
-            gh release create v1.1.1-dev LocalCastCtrl-1.1.1-dev.apk --target "$(git rev-parse HEAD)" --title '局域投屏控制LocalCastCtrl 1.1.1-dev' --notes-file release-notes.md --prerelease
-          fi

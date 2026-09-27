@@ -1,11 +1,10 @@
 package com.localcast.pro.core;
 
 import android.content.Context;
-import android.net.ConnectivityManager;
 import android.net.Network;
-import android.net.NetworkCapabilities;
 
 import com.localcast.pro.utils.Logger;
+import com.localcast.pro.utils.NetworkUtils;
 
 import org.json.JSONObject;
 
@@ -153,9 +152,21 @@ public class ConnectionManager {
                 client.close(); return;
             }
 
+            // A scanned code must match the receiver's current QR. Device-list
+            // and manual connections have no QR token and remain usable; input
+            // still requires explicit approval on the sending phone.
+            String suppliedToken = request.optString("pairingToken", "");
+            if (!suppliedToken.isEmpty()
+                    && (pairingToken == null || !pairingToken.equals(suppliedToken))) {
+                writer.println(new JSONObject().put("command", "CONNECT_RESPONSE")
+                        .put("status", "INVALID_PAIRING_CODE").toString());
+                client.close();
+                return;
+            }
+
             DeviceInfo senderInfo = DeviceInfo.fromJson(request.getJSONObject("deviceInfo"));
             this.remoteDevice = senderInfo;
-            controlPaired = pairingToken != null && pairingToken.equals(request.optString("pairingToken"));
+            controlPaired = !suppliedToken.isEmpty();
 
             negotiateCodecParams(request);
 
@@ -275,8 +286,8 @@ public class ConnectionManager {
     public boolean isControlPaired() { return controlPaired; }
 
     private boolean connectOnce(String host) throws Exception {
-        Socket socket = newWifiSocket();
-        socket.connect(new InetSocketAddress(host, TCP_PORT), 5000);
+        Socket socket = connectSocketWithRouteFallback(host);
+        try {
         socket.setTcpNoDelay(true);
         socket.setSoTimeout(10000);
 
@@ -323,22 +334,45 @@ public class ConnectionManager {
         setState(ConnectionState.CONNECTED);
         notifyDeviceConnected();
         return true;
+        } catch (Exception e) {
+            try { socket.close(); } catch (IOException ignored) { }
+            throw e;
+        }
     }
 
-    private Socket newWifiSocket() throws IOException {
-        if (context != null) {
-            ConnectivityManager cm = (ConnectivityManager)
-                    context.getSystemService(Context.CONNECTIVITY_SERVICE);
-            if (cm != null) {
-                for (Network network : cm.getAllNetworks()) {
-                    NetworkCapabilities caps = cm.getNetworkCapabilities(network);
-                    if (caps != null && caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                        return network.getSocketFactory().createSocket();
-                    }
-                }
-            }
+    private Socket connectSocketWithRouteFallback(String host) throws IOException {
+        Network matchingWifi = context != null
+                ? NetworkUtils.findWifiNetworkForPeer(context, host) : null;
+        Network anyWifi = context != null
+                ? NetworkUtils.findConnectedWifiNetwork(context) : null;
+        IOException lastError = null;
+        // A directly matching Wi-Fi route is best for a shared router.
+        if (matchingWifi != null) {
+            try { return connectSocketOnNetwork(host, matchingWifi); }
+            catch (IOException e) { lastError = e; }
         }
-        return new Socket();
+        // The system route is needed for a phone hosting a hotspot: the AP
+        // interface does not appear as a ConnectivityManager Wi-Fi Network.
+        try { return connectSocketOnNetwork(host, null); }
+        catch (IOException e) { lastError = e; }
+        // On phones with mobile data preferred, a Wi-Fi LAN lacking internet
+        // may not be the default route. Try its Network explicitly as well.
+        if (anyWifi != null && !anyWifi.equals(matchingWifi)) {
+            try { return connectSocketOnNetwork(host, anyWifi); }
+            catch (IOException e) { lastError = e; }
+        }
+        throw lastError != null ? lastError : new IOException("No route to receiver");
+    }
+
+    private Socket connectSocketOnNetwork(String host, Network network) throws IOException {
+        Socket socket = network != null ? network.getSocketFactory().createSocket() : new Socket();
+        try {
+            socket.connect(new InetSocketAddress(host, TCP_PORT), 4000);
+            return socket;
+        } catch (IOException e) {
+            try { socket.close(); } catch (IOException ignored) { }
+            throw e;
+        }
     }
 
     /** Reject oversized or unterminated peer handshakes before parsing JSON. */

@@ -7,6 +7,7 @@ import android.media.projection.MediaProjection;
 import android.media.projection.MediaProjectionManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -70,6 +71,13 @@ public class MainActivity extends AppCompatActivity {
     private ActivityResultLauncher<ScanOptions> qrScanner;
     private String pendingTargetIp;
     private String pendingPairingToken;
+    private String networkFingerprint;
+    private final android.os.Handler networkHandler =
+            new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable restartDiscovery = () -> {
+        if (!isFinishing() && !isDestroyed() && deviceManager != null)
+            deviceManager.startDiscovery();
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -91,10 +99,6 @@ public class MainActivity extends AppCompatActivity {
             if (result.getContents() == null) return;
             PairingCode code = PairingCode.parse(result.getContents());
             if (code == null) { toast("二维码不是本应用的配对码"); return; }
-            if (!NetworkUtils.isOnSameWifi(this, code.ip)) {
-                toast("两台手机需连接同一 Wi-Fi 局域网");
-                return;
-            }
             DeviceInfo target = new DeviceInfo();
             target.setIpAddress(code.ip);
             target.setDeviceName("扫码设备 " + code.ip);
@@ -137,6 +141,7 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.btn_scan_pair).setOnClickListener(v -> scanPairingCode());
         findViewById(R.id.btn_show_pair_code).setOnClickListener(v ->
                 startActivity(new Intent(this, ReceiverActivity.class)));
+        findViewById(R.id.btn_hotspot_help).setOnClickListener(v -> showHotspotHelp());
         findViewById(R.id.fab_settings).setOnClickListener(v ->
                 startActivity(new Intent(this, SettingsActivity.class)));
     }
@@ -191,13 +196,30 @@ public class MainActivity extends AppCompatActivity {
         refreshNetworkHeader();
     }
 
-    private void refreshNetworkHeader() {
+    private boolean refreshNetworkHeader() {
         String ip = NetworkUtils.getLocalIpAddress(this);
         tvLocalIp.setText("0.0.0.0".equals(ip) ? "无局域网地址" : ip);
         if (castManager != null) castManager.getLocalDevice().setIpAddress(ip);
         String ssid = NetworkUtils.getWifiSSID(this);
+        android.net.Network wifi = NetworkUtils.findConnectedWifiNetwork(this);
+        String currentNetwork = ip + "|" + ssid + "|" + wifi;
+        boolean changed = networkFingerprint != null
+                && !networkFingerprint.equals(currentNetwork);
+        networkFingerprint = currentNetwork;
+        if (changed && deviceManager != null) {
+            deviceManager.stopDiscovery();
+            deviceManager.clearDiscoveredDevices();
+            devices.clear();
+            adapter.notifyDataSetChanged();
+            refreshEmptyView();
+            networkHandler.removeCallbacks(restartDiscovery);
+            networkHandler.postDelayed(restartDiscovery, 1000);
+        }
         tvWifiInfo.setText(ssid != null ? ssid :
-                (NetworkUtils.isWifiConnected(this) ? "已连接 Wi-Fi（SSID 受系统限制）" : "未连接 Wi-Fi"));
+                (NetworkUtils.isWifiConnected(this) ? "已连接 Wi-Fi（SSID 受系统限制）"
+                        : "0.0.0.0".equals(ip) ? "未连接本地无线网络"
+                        : "本地无线网络／热点已就绪"));
+        return changed;
     }
 
     private void requestNeededPermissions() {
@@ -270,8 +292,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void connectToDevice(DeviceInfo device, String token) {
-        if ("0.0.0.0".equals(NetworkUtils.getLocalIpAddress(this))) {
-            toast("未获得 Wi-Fi 地址，请检查网络连接");
+        if (!NetworkUtils.isValidIp(device.getIpAddress())) {
+            toast("目标地址无效，请重新扫码或输入");
             return;
         }
         pendingTargetIp = device.getIpAddress();
@@ -379,6 +401,17 @@ public class MainActivity extends AppCompatActivity {
                 .setNegativeButton("取消", null).show();
     }
 
+    private void showHotspotHelp() {
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("用一台手机的热点连接")
+                .setMessage("① 在主力机的系统设置中开启个人热点。\n② 让另一台手机连接该热点。\n③ 在接收画面的手机上打开本应用并显示二维码。\n④ 主力机扫码，按提示允许投屏和本次控制。\n\n不必再连接第三个 Wi-Fi。若连接失败，请检查主力机的热点设置是否允许设备互访，并先尝试扫码连接。")
+                .setPositiveButton("打开网络设置", (d, w) -> {
+                    try { startActivity(new Intent(Settings.ACTION_WIRELESS_SETTINGS)); }
+                    catch (Exception e) { startActivity(new Intent(Settings.ACTION_SETTINGS)); }
+                })
+                .setNegativeButton("知道了", null).show();
+    }
+
     private void stopCastService() {
         Intent serviceIntent = new Intent(this, CastService.class);
         serviceIntent.setAction(CastService.ACTION_STOP_CAST);
@@ -405,7 +438,13 @@ public class MainActivity extends AppCompatActivity {
             h.ip.setText(d.getIpAddress());
             boolean isTv = d.getDeviceType() == DeviceInfo.TYPE_TV || d.getDeviceType() == DeviceInfo.TYPE_BOX;
             h.icon.setImageResource(isTv ? R.drawable.ic_tv : R.drawable.ic_phone);
-            h.btnConnect.setOnClickListener(v -> connectToDevice(d));
+            h.btnConnect.setOnClickListener(v -> {
+                if (refreshNetworkHeader()) {
+                    toast("网络已切换，正在重新搜索设备");
+                    return;
+                }
+                connectToDevice(d);
+            });
         }
         @Override public int getItemCount() { return devices.size(); }
         class VH extends RecyclerView.ViewHolder {
@@ -455,6 +494,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override protected void onDestroy() {
         CastService.setProjectionReadyListener(null);
+        networkHandler.removeCallbacks(restartDiscovery);
         super.onDestroy();
         if (deviceManager != null) deviceManager.release();
         if (castManager != null && castManager.getCurrentMode() == CastManager.CastMode.IDLE)

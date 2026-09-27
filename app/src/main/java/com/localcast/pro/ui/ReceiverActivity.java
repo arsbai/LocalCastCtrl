@@ -80,10 +80,11 @@ public class ReceiverActivity extends AppCompatActivity
 
     private TextView tvSenderName, tvRecvResolution, tvRecvBitrate, tvRecvLatency;
 
-    private View layoutInfoBar, layoutControlBar;
+    private View layoutInfoBar, layoutControlBar, layoutRemoteActions;
+    private MaterialButton btnReceiverMenu;
 
     private MaterialButton btnDisplayMode, btnStopRecv;
-    private MaterialButton btnRemoteControl, btnRemoteBack, btnRemoteHome;
+    private MaterialButton btnRemoteControl, btnRemoteBack, btnRemoteHome, btnRestoreBrightness;
     private View pairingQr;
     private boolean remoteControlMode;
     private float[] controlStart;
@@ -98,7 +99,6 @@ public class ReceiverActivity extends AppCompatActivity
 
     private int displayMode = ReceiverManager.DISPLAY_MODE_FIT;
 
-    private final String[] modeNames = {"等比缩放", "全屏铺满", "全屏拉伸", "原始尺寸"};
 
 
 
@@ -124,15 +124,7 @@ public class ReceiverActivity extends AppCompatActivity
 
 
 
-    private final Runnable hideBars = () -> {
-
-        if (isFullscreenDisplayMode() || remoteControlMode) return;
-
-        layoutInfoBar.animate().alpha(0f).setDuration(500).start();
-
-        layoutControlBar.animate().alpha(0f).setDuration(500).start();
-
-    };
+    private final Runnable hideBars = this::hideBarsNow;
 
     private boolean barsVisible = true;
 
@@ -142,7 +134,8 @@ public class ReceiverActivity extends AppCompatActivity
 
         return displayMode == ReceiverManager.DISPLAY_MODE_COVER
 
-                || displayMode == ReceiverManager.DISPLAY_MODE_STRETCH;
+                || displayMode == ReceiverManager.DISPLAY_MODE_STRETCH
+                || displayMode == ReceiverManager.DISPLAY_MODE_FULLSCREEN_FIT;
 
     }
 
@@ -173,6 +166,8 @@ public class ReceiverActivity extends AppCompatActivity
         layoutInfoBar = findViewById(R.id.layout_info_bar);
 
         layoutControlBar = findViewById(R.id.layout_control_bar);
+        layoutRemoteActions = findViewById(R.id.layout_remote_actions);
+        btnReceiverMenu = findViewById(R.id.btn_receiver_menu);
 
         btnDisplayMode = findViewById(R.id.btn_display_mode);
 
@@ -180,6 +175,7 @@ public class ReceiverActivity extends AppCompatActivity
         btnRemoteControl = findViewById(R.id.btn_remote_control);
         btnRemoteBack = findViewById(R.id.btn_remote_back);
         btnRemoteHome = findViewById(R.id.btn_remote_home);
+        btnRestoreBrightness = findViewById(R.id.btn_restore_brightness);
         pairingQr = findViewById(R.id.layout_pairing_qr);
 
 
@@ -201,6 +197,15 @@ public class ReceiverActivity extends AppCompatActivity
         setupGestures();
 
         setupControls();
+        View contentRoot = findViewById(android.R.id.content);
+        contentRoot.addOnLayoutChangeListener((view, left, top, right, bottom,
+                oldLeft, oldTop, oldRight, oldBottom) -> {
+            if (right - left > 0 && bottom - top > 0
+                    && (right - left != oldRight - oldLeft
+                    || bottom - top != oldBottom - oldTop)) {
+                notifyViewSizeChanged(right - left, bottom - top);
+            }
+        });
         showPairingQr();
 
 
@@ -225,8 +230,9 @@ public class ReceiverActivity extends AppCompatActivity
                 runOnUiThread(() -> {
                     tvSenderName.setText("接收自 " + d.getDeviceName());
                     pairingQr.setVisibility(View.GONE);
-                    btnRemoteControl.setVisibility(castManager.getConnectionManager().isControlPaired()
-                            ? View.VISIBLE : View.GONE);
+                    btnRemoteControl.setVisibility(View.VISIBLE);
+                    btnReceiverMenu.setVisibility(View.VISIBLE);
+                    scheduleHideBars();
                 });
 
             }
@@ -241,8 +247,9 @@ public class ReceiverActivity extends AppCompatActivity
                     remoteControlMode = false;
                     btnRemoteControl.setText("控制");
                     btnRemoteControl.setVisibility(View.GONE);
-                    btnRemoteBack.setVisibility(View.GONE);
-                    btnRemoteHome.setVisibility(View.GONE);
+                    layoutRemoteActions.setVisibility(View.GONE);
+                    btnReceiverMenu.setVisibility(View.GONE);
+                    requestDisplayMode(ReceiverManager.DISPLAY_MODE_FIT);
                     pairingQr.setVisibility(View.VISIBLE);
 
                     Toast.makeText(ReceiverActivity.this,
@@ -379,6 +386,13 @@ public class ReceiverActivity extends AppCompatActivity
 
 
     private void notifyViewSizeChanged(int width, int height) {
+        // The available viewport determines FIT dimensions. TextureView itself
+        // becomes smaller in FIT mode and must not feed its size back here.
+        View content = findViewById(android.R.id.content);
+        if (content != null && content.getWidth() > 0 && content.getHeight() > 0) {
+            width = content.getWidth();
+            height = content.getHeight();
+        }
 
         ReceiverManager receiverManager = castManager.getReceiverManager();
 
@@ -521,6 +535,8 @@ public class ReceiverActivity extends AppCompatActivity
 
 
         if (isFullscreenDisplayMode()) {
+            boolean layoutChanged = lp.width != FrameLayout.LayoutParams.MATCH_PARENT
+                    || lp.height != FrameLayout.LayoutParams.MATCH_PARENT;
 
             lp.width = FrameLayout.LayoutParams.MATCH_PARENT;
 
@@ -528,9 +544,13 @@ public class ReceiverActivity extends AppCompatActivity
 
             lp.gravity = Gravity.CENTER;
 
-            tvDisplay.setLayoutParams(lp);
+            if (layoutChanged) tvDisplay.setLayoutParams(lp);
 
             syncSurfaceBufferSize();
+            if (!layoutChanged) {
+                updateTextureTransform();
+                return;
+            }
 
             // COVER/STRETCH 模式切换后必须等布局 pass 完成，tvDisplay.getWidth/Height 才能返回
             // 真实的全屏尺寸。直接调用 updateTextureTransform() 会拿到切换前的旧尺寸（如
@@ -812,11 +832,7 @@ public class ReceiverActivity extends AppCompatActivity
 
         displayMode = mode;
 
-        if (displayMode >= 0 && displayMode < modeNames.length) {
-
-            btnDisplayMode.setText(modeNames[displayMode]);
-
-        }
+        btnDisplayMode.setText(isFullscreenDisplayMode() ? "退出全屏" : "全屏显示");
 
         userScale = 1.0f;
 
@@ -824,25 +840,14 @@ public class ReceiverActivity extends AppCompatActivity
 
             enterImmersiveFullscreen(true);
 
-            layoutInfoBar.setVisibility(View.GONE);
-
-            layoutControlBar.setVisibility(View.GONE);
-
-            barsVisible = false;
+            hideBarsNow();
 
         } else {
 
             enterImmersiveFullscreen(false);
 
-            layoutInfoBar.setVisibility(View.VISIBLE);
-
-            layoutControlBar.setVisibility(View.VISIBLE);
-
-            layoutInfoBar.setAlpha(0.92f);
-
-            layoutControlBar.setAlpha(0.92f);
-
-            barsVisible = true;
+            showBars();
+            scheduleHideBars();
 
         }
 
@@ -874,11 +879,9 @@ public class ReceiverActivity extends AppCompatActivity
 
             public boolean onDoubleTap(MotionEvent e) {
 
-                requestDisplayMode(displayMode == ReceiverManager.DISPLAY_MODE_FIT
-
-                        ? ReceiverManager.DISPLAY_MODE_COVER
-
-                        : ReceiverManager.DISPLAY_MODE_FIT);
+                requestDisplayMode(isFullscreenDisplayMode()
+                        ? ReceiverManager.DISPLAY_MODE_FIT
+                        : ReceiverManager.DISPLAY_MODE_FULLSCREEN_FIT);
 
                 return true;
 
@@ -891,12 +894,8 @@ public class ReceiverActivity extends AppCompatActivity
             public boolean onSingleTapConfirmed(MotionEvent e) {
 
                 if (isFullscreenDisplayMode()) {
-
-                    requestDisplayMode(ReceiverManager.DISPLAY_MODE_FIT);
-
-                    Toast.makeText(ReceiverActivity.this, modeNames[ReceiverManager.DISPLAY_MODE_FIT],
-
-                            Toast.LENGTH_SHORT).show();
+                    showBars();
+                    scheduleHideBars();
 
                 } else {
 
@@ -942,7 +941,7 @@ public class ReceiverActivity extends AppCompatActivity
         ImageView image = findViewById(R.id.iv_pair_qr);
         pairingQr.setVisibility(View.VISIBLE);
         if ("0.0.0.0".equals(ip)) {
-            address.setText("未获得 Wi-Fi 地址，请检查连接并重新打开此页");
+            address.setText("未获得局域网地址，请检查 Wi-Fi 或热点后重新打开此页");
             image.setVisibility(View.GONE);
             return;
         }
@@ -968,11 +967,11 @@ public class ReceiverActivity extends AppCompatActivity
 
         btnDisplayMode.setOnClickListener(v -> {
 
-            int newMode = (displayMode + 1) % modeNames.length;
+            int newMode = isFullscreenDisplayMode()
+                    ? ReceiverManager.DISPLAY_MODE_FIT
+                    : ReceiverManager.DISPLAY_MODE_FULLSCREEN_FIT;
 
             requestDisplayMode(newMode);
-
-            Toast.makeText(this, modeNames[newMode], Toast.LENGTH_SHORT).show();
 
         });
 
@@ -989,16 +988,18 @@ public class ReceiverActivity extends AppCompatActivity
         btnRemoteControl.setOnClickListener(v -> {
             remoteControlMode = !remoteControlMode;
             btnRemoteControl.setText(remoteControlMode ? "退出控制" : "控制");
-            btnRemoteBack.setVisibility(remoteControlMode ? View.VISIBLE : View.GONE);
-            btnRemoteHome.setVisibility(remoteControlMode ? View.VISIBLE : View.GONE);
+            layoutRemoteActions.setVisibility(remoteControlMode ? View.VISIBLE : View.GONE);
             if (remoteControlMode) {
-                requestDisplayMode(ReceiverManager.DISPLAY_MODE_FIT);
                 showBars();
-                Toast.makeText(this, "请先在被控手机上允许本次控制", Toast.LENGTH_LONG).show();
+                scheduleHideBars();
+                Toast.makeText(this, "可直接点按画面；若无响应，请在发送手机允许本次控制",
+                        Toast.LENGTH_LONG).show();
             }
         });
+        btnReceiverMenu.setOnClickListener(v -> toggleBars());
         btnRemoteBack.setOnClickListener(v -> sendRemoteAction("back"));
         btnRemoteHome.setOnClickListener(v -> sendRemoteAction("home"));
+        btnRestoreBrightness.setOnClickListener(v -> sendRemoteAction("restore_brightness"));
         tvDisplay.setOnTouchListener((v, e) -> {
 
             if (remoteControlMode) {
@@ -1009,16 +1010,6 @@ public class ReceiverActivity extends AppCompatActivity
             gestureDetector.onTouchEvent(e);
 
             scaleDetector.onTouchEvent(e);
-
-            if (e.getAction() == MotionEvent.ACTION_DOWN && !isFullscreenDisplayMode()) {
-
-                showBars();
-
-                tvDisplay.removeCallbacks(hideBars);
-
-                tvDisplay.postDelayed(hideBars, 5000);
-
-            }
 
             return true;
 
@@ -1075,7 +1066,10 @@ public class ReceiverActivity extends AppCompatActivity
         return point;
     }
 
-    private void toggleBars() { if (barsVisible) hideBarsNow(); else showBars(); }
+    private void toggleBars() {
+        if (barsVisible) hideBarsNow();
+        else { showBars(); scheduleHideBars(); }
+    }
 
     private void showBars() {
 
@@ -1085,9 +1079,9 @@ public class ReceiverActivity extends AppCompatActivity
 
         layoutControlBar.setVisibility(View.VISIBLE);
 
-        layoutInfoBar.animate().alpha(0.92f).setDuration(300).start();
-
-        layoutControlBar.animate().alpha(0.92f).setDuration(300).start();
+        layoutInfoBar.setAlpha(0.92f);
+        layoutControlBar.setAlpha(0.92f);
+        btnReceiverMenu.setText("隐藏");
 
     }
 
@@ -1095,22 +1089,34 @@ public class ReceiverActivity extends AppCompatActivity
 
         barsVisible = false;
 
-        layoutInfoBar.animate().alpha(0f).setDuration(500).start();
-
-        layoutControlBar.animate().alpha(0f).setDuration(500).start();
+        layoutInfoBar.setVisibility(View.GONE);
+        layoutControlBar.setVisibility(View.GONE);
+        btnReceiverMenu.setText("操作");
 
     }
 
-    private void scheduleHideBars() { tvDisplay.postDelayed(hideBars, 5000); }
+    private void scheduleHideBars() {
+        tvDisplay.removeCallbacks(hideBars);
+        tvDisplay.postDelayed(hideBars, 5000);
+    }
 
 
 
     @Override
 
     public void onBackPressed() {
-
+        if (isFullscreenDisplayMode()) {
+            requestDisplayMode(ReceiverManager.DISPLAY_MODE_FIT);
+            return;
+        }
+        if (remoteControlMode) {
+            remoteControlMode = false;
+            btnRemoteControl.setText("控制");
+            layoutRemoteActions.setVisibility(View.GONE);
+            showBars();
+            return;
+        }
         if (castManager != null) castManager.stopCurrentMode();
-
         super.onBackPressed();
 
     }

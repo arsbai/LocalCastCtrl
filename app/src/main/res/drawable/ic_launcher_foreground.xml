@@ -4,26 +4,29 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- 投屏图标：屏幕 + 信号 -->
+    <!-- Two phones and opposite transfer arrows, inside the adaptive icon safe area. -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M30,35 L78,35 L78,65 L30,65 Z"
-        android:strokeWidth="2"
-        android:strokeColor="#FFFFFF" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M40,45 L68,45 L68,55 L40,55 Z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M50,55 L58,55 L58,68 L50,68 Z" />
-    <path
-        android:pathData="M42,62 Q54,72 66,62"
-        android:strokeWidth="2"
+        android:fillColor="#00000000"
         android:strokeColor="#FFFFFF"
-        android:fillColor="#00000000" />
+        android:strokeWidth="3.6"
+        android:strokeLineJoin="round"
+        android:pathData="M24,22 L39,22 Q43,22 43,26 L43,82 Q43,86 39,86 L24,86 Q20,86 20,82 L20,26 Q20,22 24,22 Z" />
     <path
-        android:pathData="M38,66 Q54,78 70,66"
-        android:strokeWidth="2"
+        android:fillColor="#00000000"
         android:strokeColor="#FFFFFF"
-        android:fillColor="#00000000" />
+        android:strokeWidth="3.6"
+        android:strokeLineJoin="round"
+        android:pathData="M69,22 L84,22 Q88,22 88,26 L88,82 Q88,86 84,86 L69,86 Q65,86 65,82 L65,26 Q65,22 69,22 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M27,28 L36,28 L36,30 L27,30 Z M72,28 L81,28 L81,30 L72,30 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M29,79 A2.5,2.5 0,1 1,34 79 A2.5,2.5 0,1 1,29 79 M74,79 A2.5,2.5 0,1 1,79 79 A2.5,2.5 0,1 1,74 79" />
+    <path
+        android:fillColor="#D0BCFF"
+        android:pathData="M48,39 L58,39 L58,35 L65,43 L58,51 L58,47 L48,47 Z" />
+    <path
+        android:fillColor="#D0BCFF"
+        android:pathData="M60,61 L50,61 L50,57 L43,65 L50,73 L50,69 L60,69 Z" />
 </vector>

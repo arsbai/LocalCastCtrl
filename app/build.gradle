@@ -11,13 +11,14 @@ if (releaseSigningFile.isFile()) {
 android {
     namespace 'com.localcast.pro'
     compileSdk 34
+    compileSdkExtension 12
 
     defaultConfig {
         applicationId "com.localcast.pro"
         minSdk 24
         targetSdk 34
-        versionCode 13
-        versionName "1.1.1-dev"
+        versionCode 17
+        versionName "1.1.5-dev"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
@@ -47,7 +48,8 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
         debug {
-            applicationIdSuffix '.dev'
+            // Keep this experimental package separate from 1.1.1-dev.
+            applicationIdSuffix '.experiment'
             minifyEnabled false
         }
     }

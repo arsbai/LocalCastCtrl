@@ -85,7 +85,7 @@
             android:layout_width="0dp"
             android:layout_height="48dp"
             android:layout_weight="1"
-            android:text="全屏"
+            android:text="接收端全屏"
             android:textColor="@color/white"
             android:textSize="14sp" />
 
@@ -105,7 +105,7 @@
             android:layout_width="0dp"
             android:layout_height="48dp"
             android:layout_weight="1"
-            android:text="切换方向"
+            android:text="结束并反向"
             android:textColor="@color/white"
             android:textSize="14sp" />
 
@@ -117,6 +117,15 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="允许本次远程控制"
+            android:textColor="@color/white" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_dim_sender"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="主机极暗（实验）"
             android:textColor="@color/white" />
 
     </LinearLayout>

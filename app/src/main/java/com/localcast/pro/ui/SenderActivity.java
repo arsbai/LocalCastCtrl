@@ -3,9 +3,10 @@ package com.localcast.pro.ui;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.content.Intent;
-import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.view.MotionEvent;
 import android.view.View;
@@ -36,12 +37,14 @@ public class SenderActivity extends AppCompatActivity {
     private static final int REQUEST_AUDIO_PERMISSION = 1001;
 
     private TextView tvReceiverName, tvLatency, tvBitrate, tvFps;
-    private MaterialButton btnPause, btnStop, btnSwitch, btnFullscreen, btnAllowControl;
+    private MaterialButton btnPause, btnStop, btnSwitch, btnFullscreen, btnAllowControl, btnDim;
     private View layoutStats;
 
     private CastManager castManager;
     private boolean isPaused;
     private boolean senderFullscreen;
+    private boolean awaitingAccessibilitySettings;
+    private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService controlExecutor = Executors.newSingleThreadExecutor();
 
     private float dX, dY, initX, initY;
@@ -66,6 +69,7 @@ public class SenderActivity extends AppCompatActivity {
         btnSwitch = findViewById(R.id.btn_switch);
         btnFullscreen = findViewById(R.id.btn_fullscreen);
         btnAllowControl = findViewById(R.id.btn_allow_control);
+        btnDim = findViewById(R.id.btn_dim_sender);
         layoutStats = findViewById(R.id.layout_stats);
 
         castManager = ((LocalCastApplication) getApplication()).getCastManager();
@@ -99,15 +103,21 @@ public class SenderActivity extends AppCompatActivity {
             finish();
         });
 
-        btnSwitch.setOnClickListener(v -> {
-            castManager.stopCurrentMode();
-            startActivity(new Intent(this, ReceiverActivity.class));
-            finish();
-        });
+        btnSwitch.setOnClickListener(v -> new MaterialAlertDialogBuilder(this)
+                .setTitle("结束当前投屏并切换方向？")
+                .setMessage("切换方向需要断开当前连接。另一台手机也需要切换到发送投屏。")
+                .setPositiveButton("结束并切换", (dialog, which) -> {
+                    castManager.stopCurrentMode();
+                    startActivity(new Intent(this, ReceiverActivity.class));
+                    finish();
+                })
+                .setNegativeButton("取消", null).show());
 
-        // 全屏：发送端切横屏捕获 + 接收端 COVER 铺满电视
+        // Only change the receiver presentation. Recreating MediaProjection here
+        // can break the stream, and COVER cuts off controls on a phone screen.
         btnFullscreen.setOnClickListener(v -> toggleFullscreen());
         btnAllowControl.setOnClickListener(v -> toggleRemoteControl());
+        btnDim.setOnClickListener(v -> toggleLocalDisplayDim());
 
         // 悬浮统计拖拽
         layoutStats.setOnTouchListener(new View.OnTouchListener() {
@@ -148,6 +158,7 @@ public class SenderActivity extends AppCompatActivity {
             @Override
             public void onDisconnected(String reason) {
                 runOnUiThread(() -> {
+                    RemoteControlService.restoreLocalDisplay();
                     Toast.makeText(SenderActivity.this,
                             "投屏断开: " + reason, Toast.LENGTH_LONG).show();
                     finish();
@@ -201,40 +212,111 @@ public class SenderActivity extends AppCompatActivity {
             tvReceiverName.setText("投屏至 " + connectedDevice.getDeviceName());
         }
         refreshControlButton();
+        refreshDimButton();
     }
 
     @Override protected void onResume() {
         super.onResume();
-        if (castManager != null) refreshControlButton();
+        if (castManager != null) {
+            refreshControlButton();
+            refreshDimButton();
+            if (awaitingAccessibilitySettings) {
+                uiHandler.postDelayed(this::checkAccessibilityReturn, 700);
+            }
+        }
+    }
+
+    private void checkAccessibilityReturn() {
+        if (!awaitingAccessibilitySettings || isFinishing() || isDestroyed()) return;
+        if (RemoteControlService.isAvailable()) {
+            awaitingAccessibilitySettings = false;
+            refreshControlButton();
+            if (castManager != null && !castManager.isRemoteControlAllowed()) {
+                showSessionControlApproval();
+            }
+            return;
+        }
+        uiHandler.postDelayed(() -> {
+            if (!awaitingAccessibilitySettings || isFinishing() || isDestroyed()) return;
+            awaitingAccessibilitySettings = false;
+            refreshControlButton();
+            Toast.makeText(this,
+                    "系统控制服务未保持开启。请检查系统无障碍开关；部分手机还需启用该服务的快捷方式或允许后台运行。",
+                    Toast.LENGTH_LONG).show();
+        }, 1700);
     }
 
     private void refreshControlButton() {
         btnAllowControl.setText(castManager.isRemoteControlAllowed()
-                ? "停止远程控制" : "允许本次远程控制");
+                ? "停止远程控制"
+                : RemoteControlService.isAvailable() ? "允许本次远程控制"
+                : "开启系统控制服务");
+    }
+
+    private void refreshDimButton() {
+        btnDim.setText(RemoteControlService.isLocalDisplayDimmed()
+                ? "恢复主机亮度" : "主机极暗（实验）");
+    }
+
+    private void toggleLocalDisplayDim() {
+        if (RemoteControlService.isLocalDisplayDimmed()) {
+            RemoteControlService.restoreLocalDisplay();
+            refreshDimButton();
+            return;
+        }
+        if (!castManager.isRemoteControlAllowed()) {
+            Toast.makeText(this, "请先允许本次远程控制，再开启主机极暗模式",
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("主机极暗模式")
+                .setMessage("将主设备亮度降到系统允许的最低值并保持采集，接收端仍可查看和控制。此功能不会锁屏，但也不是硬件断电；部分屏幕仍会微亮。接收端可随时点击“恢复主机亮度”。")
+                .setPositiveButton("开启", (d, w) -> {
+                    boolean enabled = RemoteControlService.enableLocalDisplayDim();
+                    refreshDimButton();
+                    if (!enabled) Toast.makeText(this,
+                            "无法降低主设备亮度，请检查远程控制服务", Toast.LENGTH_LONG).show();
+                })
+                .setNegativeButton("取消", null).show();
     }
 
     private void toggleRemoteControl() {
         if (castManager.isRemoteControlAllowed()) {
             castManager.setRemoteControlAllowed(false);
             refreshControlButton();
+            refreshDimButton();
             return;
         }
-        if (!castManager.getConnectionManager().isControlPaired()) {
-            Toast.makeText(this, "请先扫描接收手机的二维码配对", Toast.LENGTH_LONG).show();
+        if (castManager.getConnectionManager().getState()
+                != com.localcast.pro.core.ConnectionManager.ConnectionState.CONNECTED) {
+            Toast.makeText(this, "请先连接接收手机", Toast.LENGTH_LONG).show();
             return;
         }
         if (!RemoteControlService.isAvailable()) {
             new MaterialAlertDialogBuilder(this)
                     .setTitle("开启本机远程控制服务")
                     .setMessage("请在系统无障碍设置中手动启用“局域投屏控制LocalCastCtrl远程控制”，返回后再次点击允许。本服务只在您批准的当前投屏会话中执行操作。")
-                    .setPositiveButton("打开系统设置", (d, w) ->
-                            startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)))
+                    .setPositiveButton("打开系统设置", (d, w) -> {
+                        awaitingAccessibilitySettings = true;
+                        startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+                    })
                     .setNegativeButton("取消", null).show();
+            return;
+        }
+        showSessionControlApproval();
+    }
+
+    private void showSessionControlApproval() {
+        com.localcast.pro.core.DeviceInfo remote = castManager.getConnectionManager().getRemoteDevice();
+        if (remote == null) {
+            Toast.makeText(this, "连接已断开，请重新连接", Toast.LENGTH_LONG).show();
             return;
         }
         new MaterialAlertDialogBuilder(this)
                 .setTitle("允许另一台手机操作本机？")
-                .setMessage("对方可点击、滑动、返回和进入主页。本次授权在停止投屏或断线后失效。请只与可信手机连接。")
+                .setMessage("当前连接：" + remote.getDeviceName()
+                        + "。对方可点击、滑动、返回和进入主页。本次授权在停止投屏或断线后失效。请只与可信手机连接。")
                 .setPositiveButton("允许本次控制", (d, w) -> {
                     castManager.setRemoteControlAllowed(true);
                     refreshControlButton();
@@ -249,19 +331,13 @@ public class SenderActivity extends AppCompatActivity {
     }
 
     private void toggleFullscreen() {
-        senderFullscreen = !senderFullscreen;
-        if (senderFullscreen) {
-            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
-            btnFullscreen.setText("退出全屏");
-        } else {
-            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
-            btnFullscreen.setText("全屏");
-        }
-        castManager.setSenderFullscreenCapture(senderFullscreen);
-        sendDisplayControlCommand(senderFullscreen ? (byte) 1 : (byte) 2);
+        boolean requestedFullscreen = !senderFullscreen;
+        btnFullscreen.setEnabled(false);
+        sendDisplayControlCommand(requestedFullscreen ? (byte) 1 : (byte) 2,
+                requestedFullscreen);
     }
 
-    private void sendDisplayControlCommand(byte commandType) {
+    private void sendDisplayControlCommand(byte commandType, boolean requestedFullscreen) {
         controlExecutor.execute(() -> {
             com.localcast.pro.core.StreamTransport transport =
                     castManager.getConnectionManager().getStreamTransport();
@@ -274,8 +350,14 @@ public class SenderActivity extends AppCompatActivity {
                     1);
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed()) return;
+                btnFullscreen.setEnabled(true);
+                if (success) {
+                    senderFullscreen = requestedFullscreen;
+                    btnFullscreen.setText(senderFullscreen
+                            ? "退出接收端全屏" : "接收端全屏");
+                }
                 String message = !ready ? "传输层未就绪"
-                        : success ? (commandType == 1 ? "电视全屏铺满" : "已退出全屏")
+                        : success ? (commandType == 1 ? "接收端全屏，保留完整画面" : "已退出全屏")
                         : "发送失败，请检查连接";
                 Toast.makeText(this, message, Toast.LENGTH_SHORT).show();
             });
@@ -284,15 +366,16 @@ public class SenderActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        uiHandler.removeCallbacksAndMessages(null);
         controlExecutor.shutdownNow();
         super.onDestroy();
     }
 
     private boolean checkAudioPermission() {
         int permissionStatus = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO);
-        Logger.i(TAG, "Checking audio permission, current status: " + 
+        Logger.i(TAG, "Checking audio permission, current status: " +
                  (permissionStatus == PackageManager.PERMISSION_GRANTED ? "GRANTED" : "DENIED"));
-        
+
         if (permissionStatus != PackageManager.PERMISSION_GRANTED) {
             Logger.i(TAG, "Requesting audio permission from user");
             ActivityCompat.requestPermissions(this,
